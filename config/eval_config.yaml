@@ -1,0 +1,9 @@
+# Evaluation and plotting configuration
+results_dir: "results/YYYYMMDD_HHMMSS"  # path to results directory from experiment
+
+eval:
+  # Add evaluation-specific parameters here
+
+plotting:
+  # Add plotting-specific parameters here
+
