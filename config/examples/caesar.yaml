@@ -1,0 +1,24 @@
+# Example: Caesar cipher experiment
+model:
+  provider: "openai"
+  name: "gpt-4o"
+
+cipher:
+  type: "caesar"
+  params:
+    shift: 3  # Caesar cipher shift amount
+
+prompt:
+  num_examples: 5
+  include_instructions: true
+
+dataset:
+  name: "math500"
+  num_test_examples: 100
+  train_split: 0.7
+  val_split: 0.15
+  test_split: 0.15
+
+experiment:
+  output_dir: "results"
+

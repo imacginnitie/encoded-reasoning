@@ -3,160 +3,217 @@
 import argparse
 import json
 import os
+import random
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 import anthropic
 import openai
 import yaml
+from dotenv import load_dotenv
 
-from encoded_reasoning.dataset import load_processed_dataset
+# Load environment variables from .env file
+load_dotenv()
+
+from encoded_reasoning.ciphers import get_encoding_scheme
+from encoded_reasoning.dataset import (
+    extract_answer_from_boxed,
+    load_math500_dataset,
+    save_processed_dataset,
+)
 
 
-def load_config(config_path: str) -> dict[str, Any]:
+def load_config(config_path: str):
     """Load configuration from YAML file."""
     with open(config_path) as f:
         return yaml.safe_load(f)
 
 
-def load_api_key(provider: str) -> str:
-    """Load API key from environment variables."""
-    if provider == "openai":
-        key = os.getenv("OPENAI_API_KEY")
-        if not key:
-            raise ValueError("OPENAI_API_KEY not found in environment")
-        return key
-    elif provider == "anthropic":
-        key = os.getenv("ANTHROPIC_API_KEY")
-        if not key:
-            raise ValueError("ANTHROPIC_API_KEY not found in environment")
-        return key
-    else:
-        raise ValueError(f"Unknown provider: {provider}")
-
-
-def call_llm_api(
-    prompt: str,
-    provider: str,
-    model_name: str,
-    api_key: str,
-    max_retries: int = 5,
-) -> str:
-    """Call LLM API with exponential backoff for rate limiting."""
+def call_llm(prompt: str, provider: str, model: str, api_key: str, max_retries: int = 5):
+    """Call LLM API with retries."""
     for attempt in range(max_retries):
         try:
             if provider == "openai":
                 client = openai.OpenAI(api_key=api_key)
                 response = client.chat.completions.create(
-                    model=model_name,
+                    model=model,
                     messages=[{"role": "user", "content": prompt}],
-                    temperature=0.0,  # Deterministic for reproducibility
+                    temperature=0.0,
                 )
                 return response.choices[0].message.content or ""
             elif provider == "anthropic":
                 client = anthropic.Anthropic(api_key=api_key)
                 response = client.messages.create(
-                    model=model_name,
+                    model=model,
                     max_tokens=4096,
                     messages=[{"role": "user", "content": prompt}],
-                    temperature=0.0,  # Deterministic for reproducibility
+                    temperature=0.0,
                 )
-                # Anthropic returns a list of text blocks
-                return "".join(block.text for block in response.content if hasattr(block, "text"))
+                # Extract text from Anthropic response blocks
+                text_parts = []
+                for block in response.content:
+                    if hasattr(block, "text"):
+                        text_parts.append(getattr(block, "text", ""))
+                return "".join(text_parts)
             else:
                 raise ValueError(f"Unknown provider: {provider}")
         except Exception as e:
-            # Check if it's a rate limit error
-            is_rate_limit = (
-                (isinstance(e, openai.RateLimitError) if provider == "openai" else False)
-                or (isinstance(e, anthropic.RateLimitError) if provider == "anthropic" else False)
-                or "rate limit" in str(e).lower()
-                or "429" in str(e)
+            if attempt < max_retries - 1:
+                wait_time = 2**attempt if "rate limit" in str(e).lower() or "429" in str(e) else 1
+                print(f"Error (attempt {attempt + 1}/{max_retries}): {e}. Waiting {wait_time}s...")
+                time.sleep(wait_time)
+            else:
+                raise
+    raise RuntimeError("Failed after retries")
+
+
+def format_prompt(examples, encoding_scheme, include_instructions=True):
+    """Format few-shot prompt."""
+    parts = []
+
+    if include_instructions and not encoding_scheme.get("is_programmatic", True):
+        parts.append(f"Instructions: {encoding_scheme['instruction']}\n")
+
+    parts.append("Examples:")
+    for ex in examples:
+        parts.append(f"Input: {ex['input']}")
+        parts.append(f"Output: {ex['output']}\n")
+
+    return "\n".join(parts)
+
+
+def process_dataset(config):
+    """Process dataset and create prompts."""
+    scheme_name = config["cipher"]["type"]
+    scheme = get_encoding_scheme(scheme_name, **config["cipher"].get("params", {}))
+
+    # Load dataset
+    all_examples = load_math500_dataset(cache_dir="data/cache")
+
+    # Split
+    random.seed(42)
+    random.shuffle(all_examples)
+
+    n_train = int(len(all_examples) * config["dataset"].get("train_split", 0.7))
+    train_examples = all_examples[:n_train]
+    test_examples = all_examples[n_train : n_train + config["dataset"]["num_test_examples"]]
+
+    # Sample few-shot examples
+    k = config["prompt"]["num_examples"]
+    few_shot_examples = random.sample(train_examples, min(k, len(train_examples)))
+
+    # Process examples
+    few_shot_processed = []
+    for ex in few_shot_examples:
+        problem = ex["problem"]
+        solution = ex.get("solution", "")
+        answer = extract_answer_from_boxed(ex.get("answer", ""))
+
+        if scheme.get("is_programmatic", True):
+            encoded_problem = scheme["encode"](problem)
+            encoded_solution = scheme["encode"](solution) if solution else ""
+            encoded_answer = scheme["encode"](answer) if answer else ""
+            few_shot_processed.append(
+                {
+                    "input": encoded_problem,
+                    "output": (
+                        f"{encoded_solution}\n\\boxed{{{encoded_answer}}}"
+                        if answer
+                        else encoded_solution
+                    ),
+                }
+            )
+        else:
+            few_shot_processed.append(
+                {
+                    "input": problem,
+                    "output": (f"{solution}\n\\boxed{{{answer}}}" if answer else solution),
+                }
             )
 
-            if attempt < max_retries - 1:
-                if is_rate_limit:
-                    wait_time = 2**attempt
-                    print(f"Rate limit hit, waiting {wait_time}s before retry...")
-                    time.sleep(wait_time)
-                else:
-                    # For other errors, wait a bit but don't retry too many times
-                    wait_time = 1
-                    print(f"Error occurred: {e}. Waiting {wait_time}s before retry...")
-                    time.sleep(wait_time)
-            else:
-                error_msg = f"Failed to get response after {max_retries} retries: {e}"
-                raise RuntimeError(error_msg) from e
+    # Process test examples
+    test_processed = []
+    for ex in test_examples:
+        problem = ex["problem"]
+        answer = extract_answer_from_boxed(ex.get("answer", ""))
 
-    raise RuntimeError("Failed to get response after retries")
+        if scheme.get("is_programmatic", True):
+            encoded_problem = scheme["encode"](problem)
+            test_processed.append(
+                {
+                    "input": encoded_problem,
+                    "expected_answer": answer,
+                    "original_problem": problem,
+                }
+            )
+        else:
+            test_processed.append(
+                {
+                    "input": problem,
+                    "expected_answer": answer,
+                    "original_problem": problem,
+                }
+            )
+
+    # Save processed data
+    output_dir = Path("data/processed") / scheme_name
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    save_processed_dataset(few_shot_processed, output_dir / "few_shot.jsonl")
+    save_processed_dataset(test_processed, output_dir / "test.jsonl")
+
+    # Create prompt
+    prompt = format_prompt(
+        few_shot_processed, scheme, config["prompt"].get("include_instructions", True)
+    )
+    with open(output_dir / "few_shot_prompt.txt", "w") as f:
+        f.write(prompt)
+
+    return test_processed, prompt
 
 
-def run_experiment(config: dict[str, Any]) -> None:
-    """Run experiment: process dataset and call LLM API."""
+def run_experiment(config):
+    """Run experiment."""
     provider = config["model"]["provider"]
-    model_name = config["model"]["name"]
+    model = config["model"]["name"]
 
-    api_key = load_api_key(provider)
+    if provider == "openai":
+        api_key = os.getenv("OPENAI_API_KEY")
+    elif provider == "anthropic":
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+    else:
+        raise ValueError(f"Unknown provider: {provider}")
 
-    # Create timestamped results directory
+    if not api_key:
+        raise ValueError(
+            f"API key not found for {provider}. "
+            f"Set {provider.upper()}_API_KEY environment variable."
+        )
+
+    # Process dataset
+    test_examples, few_shot_prompt = process_dataset(config)
+
+    # Create results directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     results_dir = Path(config["experiment"]["output_dir"]) / timestamp
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save config used for this experiment
-    config_path = results_dir / "config.yaml"
-    with open(config_path, "w") as f:
+    # Save config
+    with open(results_dir / "config.yaml", "w") as f:
         yaml.dump(config, f)
 
-    # Load processed dataset
-    encoding_type = config["cipher"]["type"]
-    processed_dir = Path("data/processed") / encoding_type
+    # Run experiment
+    results = {"timestamp": timestamp, "config": config, "responses": []}
 
-    if not processed_dir.exists():
-        raise FileNotFoundError(
-            f"Processed dataset not found at {processed_dir}. "
-            "Please run process_dataset.py first to process the dataset."
-        )
-
-    test_path = processed_dir / "test.jsonl"
-    few_shot_prompt_path = processed_dir / "few_shot_prompt.txt"
-
-    if not test_path.exists():
-        raise FileNotFoundError(f"Test dataset not found at {test_path}")
-    if not few_shot_prompt_path.exists():
-        raise FileNotFoundError(f"Few-shot prompt not found at {few_shot_prompt_path}")
-
-    # Load test examples and few-shot prompt
-    test_examples = load_processed_dataset(test_path)
-    with open(few_shot_prompt_path) as f:
-        few_shot_prompt = f.read()
-
-    results = {
-        "timestamp": timestamp,
-        "config": config,
-        "responses": [],
-    }
-
-    # Iterate through test examples
-    print(f"Running experiment on {len(test_examples)} test examples...")
+    print(f"Running experiment on {len(test_examples)} examples...")
     for i, example in enumerate(test_examples, 1):
-        print(f"Processing example {i}/{len(test_examples)}...")
+        print(f"Processing {i}/{len(test_examples)}...")
 
-        # Format full prompt: few-shot prompt + test example input
-        full_prompt = f"{few_shot_prompt}\n\nInput: {example['input']}\nOutput:"
+        prompt = f"{few_shot_prompt}\n\nInput: {example['input']}\nOutput:"
 
-        # Call LLM API
         try:
-            response = call_llm_api(
-                prompt=full_prompt,
-                provider=provider,
-                model_name=model_name,
-                api_key=api_key,
-            )
-
-            # Store response with metadata
+            response = call_llm(prompt, provider, model, api_key)
             results["responses"].append(
                 {
                     "example_index": i - 1,
@@ -164,48 +221,34 @@ def run_experiment(config: dict[str, Any]) -> None:
                     "expected_answer": example.get("expected_answer", ""),
                     "original_problem": example.get("original_problem", ""),
                     "response": response,
-                    "prompt": full_prompt,
+                    "prompt": prompt,
                 }
             )
 
-            # Save intermediate results periodically (every 10 examples)
             if i % 10 == 0:
-                intermediate_path = results_dir / "results_intermediate.json"
-                with open(intermediate_path, "w") as f:
+                with open(results_dir / "results_intermediate.json", "w") as f:
                     json.dump(results, f, indent=2)
-                print(f"  Saved intermediate results ({i} examples processed)")
         except Exception as e:
-            print(f"  Error processing example {i}: {e}")
+            print(f"Error: {e}")
             results["responses"].append(
                 {
                     "example_index": i - 1,
                     "input": example["input"],
-                    "expected_answer": example.get("expected_answer", ""),
-                    "original_problem": example.get("original_problem", ""),
                     "response": None,
                     "error": str(e),
                 }
             )
 
-    # Save final results
-    results_path = results_dir / "results.json"
-    with open(results_path, "w") as f:
+    # Save results
+    with open(results_dir / "results.json", "w") as f:
         json.dump(results, f, indent=2)
 
     print(f"Experiment complete! Results saved to {results_dir}")
-    print("To evaluate and plot, update config/eval_config.yaml with:")
-    print(f"  results_dir: {results_dir}")
 
 
 def main():
-    """Main entry point."""
-    parser = argparse.ArgumentParser(description="Run experiment")
-    parser.add_argument(
-        "--config",
-        type=str,
-        default="config.yaml",
-        help="Path to config YAML file",
-    )
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", type=str, default="config.yaml")
     args = parser.parse_args()
 
     config = load_config(args.config)

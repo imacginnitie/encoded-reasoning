@@ -1,0 +1,25 @@
+# Example experiment configuration
+# Copy this to config.yaml and modify as needed
+
+model:
+  provider: "openai"  # or "anthropic"
+  name: "gpt-4o"  # e.g., "gpt-4o", "gpt-4-turbo", "claude-3-5-sonnet-20241022"
+
+cipher:
+  type: "caesar"  # encoding type: "caesar", "base64", "emojispeak", "chinese", "pinyin"
+  params: {}  # cipher-specific parameters (e.g., {"shift": 3} for caesar)
+
+prompt:
+  num_examples: 5  # k: number of examples in few-shot prompt
+  include_instructions: true  # whether to include cipher instructions
+
+dataset:
+  name: "math500"  # Dataset name (currently only math500 supported)
+  num_test_examples: 100  # n: number of examples to test on (max 500 for MATH 500)
+  train_split: 0.7
+  val_split: 0.15
+  test_split: 0.15
+
+experiment:
+  output_dir: "results"  # base directory for results (will create timestamped subdir)
+

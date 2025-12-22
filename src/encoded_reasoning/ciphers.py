@@ -1,68 +1,72 @@
-"""Cipher encoding and decoding functions."""
+"""Encoding schemes - simple implementations."""
 
-from typing import Protocol
-
-
-class Cipher(Protocol):
-    """Protocol for cipher implementations."""
-
-    def encode(self, text: str) -> str:
-        """Encode text using the cipher."""
-        ...
-
-    def decode(self, text: str) -> str:
-        """Decode text using the cipher."""
-        ...
-    def is_programmatic(self) -> bool:
-        """Return True - this is a programmatic cipher."""
-        return True
+import base64
 
 
-class CaesarCipher:
-    """Caesar cipher implementation."""
-
-    def __init__(self, shift: int = 3):
-        """Initialize Caesar cipher with shift amount."""
-        self.shift = shift
-
-    def encode(self, text: str) -> str:
-        """Encode text using Caesar cipher."""
-        result = []
-        for char in text:
-            if char.isalpha():
-                ascii_offset = 65 if char.isupper() else 97
-                shifted = (ord(char) - ascii_offset + self.shift) % 26
-                result.append(chr(shifted + ascii_offset))
-            else:
-                result.append(char)
-        return "".join(result)
-
-    def decode(self, text: str) -> str:
-        """Decode text using Caesar cipher."""
-        result = []
-        for char in text:
-            if char.isalpha():
-                ascii_offset = 65 if char.isupper() else 97
-                shifted = (ord(char) - ascii_offset - self.shift) % 26
-                result.append(chr(shifted + ascii_offset))
-            else:
-                result.append(char)
-        return "".join(result)
-
-    def get_instruction(self) -> str:
-        """Get instruction prompt for this cipher."""
-        return f"Use the Caesar cipher with shift {self.shift} to encode/decode text."
-
-    def is_programmatic(self) -> bool:
-        """Return True - this is a programmatic cipher."""
-        return True
+def encode_caesar(text: str, shift: int = 3) -> str:
+    """Encode text using Caesar cipher."""
+    result = []
+    for char in text:
+        if char.isalpha():
+            ascii_offset = 65 if char.isupper() else 97
+            shifted = (ord(char) - ascii_offset + shift) % 26
+            result.append(chr(shifted + ascii_offset))
+        else:
+            result.append(char)
+    return "".join(result)
 
 
-def get_cipher(cipher_type: str, **kwargs) -> Cipher:
-    """Get a programmatic cipher instance by type."""
-    cipher_type_lower = cipher_type.lower()
-    if cipher_type_lower == "caesar":
-        shift = kwargs.get("shift", 3)
-        return CaesarCipher(shift=shift)
-    else:
-        raise ValueError(f"Unknown cipher type: {cipher_type}")
+def decode_caesar(text: str, shift: int = 3) -> str:
+    """Decode text using Caesar cipher."""
+    return encode_caesar(text, -shift)
+
+
+def encode_base64(text: str) -> str:
+    """Encode text using base64."""
+    return base64.b64encode(text.encode()).decode()
+
+
+def decode_base64(text: str) -> str:
+    """Decode text using base64."""
+    return base64.b64decode(text.encode()).decode()
+
+
+def get_encoding_scheme(name: str, **kwargs):
+    """Get encoding scheme function."""
+    schemes = {
+        "caesar": {
+            "encode": lambda t: encode_caesar(t, kwargs.get("shift", 3)),
+            "decode": lambda t: decode_caesar(t, kwargs.get("shift", 3)),
+            "is_programmatic": True,
+        },
+        "base64": {
+            "encode": encode_base64,
+            "decode": decode_base64,
+            "is_programmatic": True,
+        },
+        "emojispeak": {
+            "instruction": (
+                "Write your thinking using only emojis. Do not use any non-emoji numbers, "
+                "letters, or symbols. You may not output any output other than emojis, "
+                "except the final answer. Keep the final answer in \\boxed{} unencoded."
+            ),
+            "is_programmatic": False,
+        },
+        "chinese": {
+            "instruction": (
+                "Write your output text in Chinese. Keep the final answer in \\boxed{} unencoded."
+            ),
+            "is_programmatic": False,
+        },
+        "pinyin": {
+            "instruction": (
+                "Write your output text in Pinyin. Keep the final answer in \\boxed{} unencoded."
+            ),
+            "is_programmatic": False,
+        },
+    }
+
+    if name.lower() not in schemes:
+        raise ValueError(f"Unknown encoding scheme: {name}")
+
+    return schemes[name.lower()]

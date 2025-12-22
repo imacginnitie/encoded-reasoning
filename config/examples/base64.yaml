@@ -1,0 +1,23 @@
+# Example: Base64 encoding experiment
+model:
+  provider: "openai"
+  name: "gpt-4o"
+
+cipher:
+  type: "base64"
+  params: {}
+
+prompt:
+  num_examples: 5
+  include_instructions: true
+
+dataset:
+  name: "math500"
+  num_test_examples: 100
+  train_split: 0.7
+  val_split: 0.15
+  test_split: 0.15
+
+experiment:
+  output_dir: "results"
+

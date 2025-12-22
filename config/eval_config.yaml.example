@@ -1,0 +1,12 @@
+# Example evaluation configuration
+# Copy this to config/eval_config.yaml and update the results_dir path
+
+results_dir: "results/YYYYMMDD_HHMMSS"  # path to results directory from experiment
+# Example: results_dir: "results/20250101_120000"
+
+eval:
+  # Add evaluation-specific parameters here
+
+plotting:
+  # Add plotting-specific parameters here
+
