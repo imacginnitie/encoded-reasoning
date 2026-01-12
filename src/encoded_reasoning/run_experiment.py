@@ -179,13 +179,19 @@ def process_dataset(config):
         encoded_problems = {ex.get("input", "") for ex in encoded_examples if ex.get("input")}
         overlap = encoded_problems & test_problems
         if overlap:
-            print(f"⚠️  Warning: Overlap detected between pre-made examples and test! Found {len(overlap)} overlapping problems.")
+            print(
+                f"⚠️  Warning: Overlap detected between pre-made examples and test! "
+                f"Found {len(overlap)} overlapping problems."
+            )
             print("   Removing overlapping problems from test set to prevent data leakage.")
             # Filter out overlapping problems from test set
             test_examples = [ex for ex in test_examples if ex["problem"] not in overlap]
             test_problems = {ex["problem"] for ex in test_examples}
             if len(test_examples) < num_test:
-                print(f"   Note: Test set now has {len(test_examples)} examples (requested {num_test}).")
+                print(
+                    f"   Note: Test set now has {len(test_examples)} examples "
+                    f"(requested {num_test})."
+                )
         few_shot_processed = encoded_examples
     else:
         few_shot_examples = random.sample(train_examples, min(k, len(train_examples)))
