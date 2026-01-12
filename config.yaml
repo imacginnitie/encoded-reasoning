@@ -1,7 +1,7 @@
 # Experiment configuration
 model:
-  provider: "openai"  # or "anthropic"
-  name: "gpt-4o"  # e.g., "gpt-4o", "gpt-4-turbo", "claude-3-5-sonnet-20241022"
+  provider: "anthropic"  # or "anthropic"
+  name: "claude-sonnet-4-5"  # e.g., "gpt-4o", "gpt-4-turbo", "claude-3-5-sonnet-20241022"
 
 cipher:
   type: "emojispeak"  # encoding type: programmatic ciphers (caesar) or prompt encodings (emojispeak, chinese, pinyin)
@@ -20,5 +20,5 @@ dataset:
   # The test split is used for evaluation.
 
 experiment:
-  output_dir: "results"  # base directory for results (will create timestamped subdir)
+  output_dir: "results/anthropic/claude-sonnet-4-5"  # base directory for results (will create timestamped subdir)
 
