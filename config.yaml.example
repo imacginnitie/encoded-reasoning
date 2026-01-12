@@ -1,11 +1,32 @@
 # Experiment configuration
-model:
-  provider: "anthropic"  # or "anthropic"
-  name: "claude-sonnet-4-5"  # e.g., "gpt-4o", "gpt-4-turbo", "claude-3-5-sonnet-20241022"
+# You can use either single model/cipher OR matrix configuration (not both)
 
-cipher:
-  type: "emojispeak"  # encoding type: programmatic ciphers (caesar) or prompt encodings (emojispeak, chinese, pinyin)
-  params: {}  # cipher-specific parameters (e.g., {"shift": 3} for caesar)
+# Option 1: Single model and cipher (for backward compatibility)
+# model:
+#   provider: "anthropic"  # or "openai"
+#   name: "claude-sonnet-4-5"  # e.g., "gpt-4o", "gpt-4-turbo", "claude-3-5-sonnet-20241022"
+#
+# cipher:
+#   type: "emojispeak"  # encoding type: programmatic ciphers (caesar) or prompt encodings (emojispeak, chinese, pinyin)
+#   params: {}  # cipher-specific parameters (e.g., {"shift": 3} for caesar)
+
+# Option 2: Matrix configuration (runs all combinations of models × ciphers)
+matrix:
+  models:
+    - provider: "anthropic"
+      name: "claude-sonnet-4-5"
+    - provider: "openai"
+      name: "gpt-4o"
+  ciphers:
+    - type: "identity"  # Baseline - no encoding (important for normalization)
+      params: {}
+    - type: "emojispeak"
+      params: {}
+    - type: "caesar"
+      params:
+        shift: 3
+    - type: "base64"
+      params: {}
 
 prompt:
   num_examples: 4  # k: number of examples in few-shot prompt
@@ -16,5 +37,5 @@ dataset:
   num_test_examples: 100  # n: number of examples to test on (max 500 for MATH 500)
 
 experiment:
-  output_dir: "results/anthropic/claude-sonnet-4-5"  # base directory for results (will create timestamped subdir)
+  output_dir: "results"  # base directory for results (will create subdirs for each model/cipher combination)
 

@@ -31,6 +31,16 @@ def decode_base64(text: str) -> str:
     return base64.b64decode(text.encode()).decode()
 
 
+def encode_identity(text: str) -> str:
+    """Identity encoding - returns text unchanged (baseline/no encoding)."""
+    return text
+
+
+def decode_identity(text: str) -> str:
+    """Identity decoding - returns text unchanged."""
+    return text
+
+
 def get_encoding_scheme(name: str, **kwargs):
     """Get encoding scheme function."""
     schemes = {
@@ -43,6 +53,12 @@ def get_encoding_scheme(name: str, **kwargs):
             "encode": encode_base64,
             "decode": decode_base64,
             "is_programmatic": True,
+        },
+        "identity": {
+            "encode": encode_identity,
+            "decode": decode_identity,
+            "is_programmatic": True,
+            "is_identity": True,  # Special flag for identity cipher
         },
         "emojispeak": {
             "instruction": (

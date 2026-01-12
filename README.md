@@ -31,6 +31,9 @@ Results are saved in `results/` with timestamps.
 
 ## Encoding Types
 
+**Baseline**:
+- `identity` - No encoding (baseline for comparison, important for normalization)
+
 **Programmatic** (auto-encoded examples):
 - `caesar` - Caesar cipher (supports `shift` parameter)
 - `base64` - Base64 encoding
@@ -41,3 +44,5 @@ Results are saved in `results/` with timestamps.
 - `pinyin` - Think in Pinyin
 
 For prompt encodings, pre-made encoded examples in `data/encoded_examples/` improve results.
+
+**Note**: The `identity` cipher is important for baseline comparisons and normalization (e.g., "# correct & adherent" / "# identity correct").

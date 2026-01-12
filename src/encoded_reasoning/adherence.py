@@ -117,11 +117,25 @@ def check_base64_adherence(response: str, scheme, threshold: float = 0.7):
     return _check_simple_encoding(response, scheme)
 
 
+def check_identity_adherence(response: str):
+    """Check adherence for identity cipher (baseline - no encoding required)."""
+    reasoning_text = extract_reasoning_text(response)
+    final_answer_unencoded = check_final_answer_unencoded(response)
+    # For identity, adherence just means there's reasoning and an answer
+    return {
+        "is_adherent": final_answer_unencoded and len(reasoning_text) > 0,
+        "final_answer_unencoded": final_answer_unencoded,
+        "has_reasoning": len(reasoning_text) > 0,
+    }
+
+
 def check_adherence(response: str, encoding_type: str, scheme=None):
     """Check adherence for any encoding type."""
     encoding_type = encoding_type.lower()
 
-    if encoding_type == "emojispeak":
+    if encoding_type == "identity":
+        return check_identity_adherence(response)
+    elif encoding_type == "emojispeak":
         return check_emojispeak_adherence(response)
     elif encoding_type == "caesar":
         return check_caesar_adherence(response, scheme)

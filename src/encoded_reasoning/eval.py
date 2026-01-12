@@ -40,22 +40,36 @@ def evaluate_results(results_dir: str | Path, config: dict | None = None):
     correct = sum(1 for p, gt in zip(predictions, ground_truth) if p == gt)
     accuracy = correct / n if n > 0 else 0.0
     adherence_rate = sum(1 for a in adherence_scores if a["is_adherent"]) / n if n > 0 else 0.0
+    adherent_and_correct = sum(
+        1
+        for p, gt, a in zip(predictions, ground_truth, adherence_scores)
+        if p == gt and a["is_adherent"]
+    )
+    adherent_and_correct_rate = adherent_and_correct / n if n > 0 else 0.0
 
     metrics = {
         "accuracy": accuracy,
         "accuracy_std_error": _calculate_std_error(accuracy, n),
         "adherence_rate": adherence_rate,
         "adherence_std_error": _calculate_std_error(adherence_rate, n),
+        "adherent_and_correct_rate": adherent_and_correct_rate,
+        "adherent_and_correct_std_error": _calculate_std_error(adherent_and_correct_rate, n),
         "n": n,
         "correct": correct,
+        "adherent_and_correct": adherent_and_correct,
     }
 
     results["metrics"] = metrics
     (results_dir / "results.json").write_text(json.dumps(results, indent=2))
     acc_str = f"{metrics['accuracy']:.3f} ± {metrics['accuracy_std_error']:.3f}"
     adh_str = f"{metrics['adherence_rate']:.3f} ± {metrics['adherence_std_error']:.3f}"
-    print(f"Accuracy: {acc_str} (n={n})")
-    print(f"Adherence: {adh_str} (n={n})")
+    adh_corr_str = (
+        f"{metrics['adherent_and_correct_rate']:.3f} ± "
+        f"{metrics['adherent_and_correct_std_error']:.3f}"
+    )
+    print(f"Accuracy: {acc_str} ({correct}/{n})")
+    print(f"Adherence: {adh_str} ({sum(1 for a in adherence_scores if a['is_adherent'])}/{n})")
+    print(f"Adherent & Correct: {adh_corr_str} ({metrics['adherent_and_correct']}/{n})")
 
 
 def main():
