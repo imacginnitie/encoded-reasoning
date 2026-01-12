@@ -46,9 +46,11 @@ def get_encoding_scheme(name: str, **kwargs):
         },
         "emojispeak": {
             "instruction": (
-                "Write your thinking using only emojis. Do not use any non-emoji numbers, "
-                "letters, or symbols. You may not output any output other than emojis, "
-                "except the final answer. Keep the final answer in \\boxed{} unencoded."
+                "You MUST write your thinking/reasoning using ONLY emojis. "
+                "Do NOT use any numbers, letters, or symbols in your reasoning. "
+                "Your reasoning steps must be entirely in emoji. "
+                "ONLY the final answer in \\boxed{} should be unencoded (normal text). "
+                "Everything else must be emojis only."
             ),
             "is_programmatic": False,
         },

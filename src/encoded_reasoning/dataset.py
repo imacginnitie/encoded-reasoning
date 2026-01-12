@@ -9,33 +9,53 @@ from datasets import load_dataset
 
 def load_math500_dataset(cache_dir=None, split=None):
     """Load MATH 500 dataset."""
-    cache_dir_str = str(cache_dir) if isinstance(cache_dir, Path) else cache_dir
-    dataset = load_dataset("ricdomolm/MATH-500", cache_dir=cache_dir_str)
-
-    if split:
-        data = dataset[split]
-    else:
-        splits = list(dataset.keys())
-        data = dataset["test"] if "test" in splits else dataset[splits[0]]
-
-    examples = []
-    for item in data:
-        # Convert to dict if needed
-        item_dict = dict(item) if not isinstance(item, dict) else item
-        examples.append(
-            {
-                "problem": item_dict.get("problem", ""),
-                "solution": item_dict.get("solution", ""),
-                "answer": item_dict.get("answer", ""),
-            }
-        )
-    return examples
+    dataset = load_dataset("ricdomolm/MATH-500", cache_dir=str(cache_dir) if cache_dir else None)
+    data = dataset[split] if split else dataset.get("test", list(dataset.values())[0])
+    return [
+        {
+            "problem": dict(item).get("problem", ""),
+            "solution": dict(item).get("solution", ""),
+            "answer": dict(item).get("answer", ""),
+        }
+        for item in data
+    ]
 
 
 def extract_answer_from_boxed(text: str) -> str:
-    """Extract answer from \\boxed{} format."""
-    matches = re.findall(r"\\boxed\{([^}]+)\}", text)
-    return matches[-1].strip() if matches else ""
+    """Extract answer from \\boxed{} format, handling nested braces."""
+    # Find all \\boxed{...} patterns, handling nested braces
+    pattern = r"\\boxed\{"
+    matches = []
+    start = 0
+    while True:
+        match = re.search(pattern, text[start:])
+        if not match:
+            break
+        boxed_start = start + match.end() - 1  # Position of opening brace
+        # Find matching closing brace by counting depth
+        depth = 0
+        i = boxed_start + 1
+        while i < len(text):
+            if text[i] == "{":
+                depth += 1
+            elif text[i] == "}":
+                if depth == 0:
+                    # Found matching closing brace
+                    matches.append(text[boxed_start + 1 : i])
+                    break
+                depth -= 1
+            i += 1
+        start = boxed_start + 1
+
+    if matches:
+        # Return the last match and normalize whitespace
+        answer = matches[-1].strip()
+        # Normalize whitespace: remove spaces after commas and around parentheses
+        answer = re.sub(r",\s+", ",", answer)  # Remove space after comma
+        answer = re.sub(r"\(\s+", "(", answer)  # Remove space after opening paren
+        answer = re.sub(r"\s+\)", ")", answer)  # Remove space before closing paren
+        return answer
+    return ""
 
 
 def save_processed_dataset(examples, output_path):
@@ -49,4 +69,19 @@ def save_processed_dataset(examples, output_path):
 def load_processed_dataset(input_path):
     """Load processed dataset from JSONL."""
     with open(input_path) as f:
-        return [json.loads(line) for line in f]
+        return [json.loads(line) for line in f if line.strip()]
+
+
+def load_encoded_examples(encoding_type: str, num_examples: int):
+    """Load pre-made encoded examples if available."""
+    import random
+
+    encoded_examples_path = Path(f"data/encoded_examples/{encoding_type}.jsonl")
+    if not encoded_examples_path.exists():
+        return None
+
+    examples = load_processed_dataset(encoded_examples_path)
+    if len(examples) > num_examples:
+        random.seed(42)
+        return random.sample(examples, num_examples)
+    return examples

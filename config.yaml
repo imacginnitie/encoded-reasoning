@@ -4,19 +4,20 @@ model:
   name: "gpt-4o"  # e.g., "gpt-4o", "gpt-4-turbo", "claude-3-5-sonnet-20241022"
 
 cipher:
-  type: "caesar"  # encoding type: programmatic ciphers (caesar) or prompt encodings (emojispeak, chinese, pinyin)
+  type: "emojispeak"  # encoding type: programmatic ciphers (caesar) or prompt encodings (emojispeak, chinese, pinyin)
   params: {}  # cipher-specific parameters (e.g., {"shift": 3} for caesar)
 
 prompt:
-  num_examples: 5  # k: number of examples in few-shot prompt
+  num_examples: 4  # k: number of examples in few-shot prompt
   include_instructions: true  # whether to include cipher instructions
 
 dataset:
   name: "math500"  # Dataset name (currently only math500 supported)
-  num_test_examples: 500  # n: number of examples to test on (max 500 for MATH 500)
-  train_split: 0.7
-  val_split: 0.15
-  test_split: 0.15
+  num_test_examples: 100  # n: number of examples to test on (max 500 for MATH 500)
+  # Note: train_split, val_split, test_split are not used.
+  # We use the actual train/test splits from the MATH-500 dataset.
+  # The train split is used for few-shot examples (no model training occurs).
+  # The test split is used for evaluation.
 
 experiment:
   output_dir: "results"  # base directory for results (will create timestamped subdir)
