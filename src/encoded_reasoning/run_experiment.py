@@ -27,6 +27,49 @@ from encoded_reasoning.dataset import (
 load_dotenv()
 
 
+def estimate_input_tokens(messages_or_prompt, provider: str) -> int:
+    """Estimate the number of input tokens for a prompt.
+
+    Uses a rough approximation: ~4 characters per token for Anthropic,
+    ~3.5 characters per token for OpenAI.
+
+    Args:
+        messages_or_prompt: For Anthropic, a list of message dicts.
+            For OpenAI, a string prompt.
+        provider: "openai" or "anthropic"
+
+    Returns:
+        Estimated number of input tokens
+    """
+    if provider == "anthropic":
+        if isinstance(messages_or_prompt, str):
+            text = messages_or_prompt
+        else:
+            # Sum up all message content
+            text = ""
+            for msg in messages_or_prompt:
+                if isinstance(msg.get("content"), str):
+                    text += msg["content"]
+                elif isinstance(msg.get("content"), list):
+                    # Handle content blocks
+                    for block in msg["content"]:
+                        if isinstance(block, dict) and "text" in block:
+                            text += block["text"]
+        # Rough estimate: ~4 characters per token for Anthropic
+        return int(len(text) / 4)
+    else:
+        # OpenAI
+        if isinstance(messages_or_prompt, str):
+            text = messages_or_prompt
+        else:
+            text = ""
+            for msg in messages_or_prompt:
+                if isinstance(msg.get("content"), str):
+                    text += msg["content"]
+        # Rough estimate: ~3.5 characters per token for OpenAI
+        return int(len(text) / 3.5)
+
+
 def load_config(config_path: str):
     """Load configuration from YAML file."""
     with open(config_path) as f:
@@ -81,9 +124,26 @@ def call_llm(messages_or_prompt, provider: str, model: str, api_key: str, max_re
                 return "".join(text_parts)
             else:
                 raise ValueError(f"Unknown provider: {provider}")
-        except Exception as e:
+        except anthropic.RateLimitError as e:
+            # Anthropic rate limit: wait longer (at least 60s to reset minute window)
             if attempt < max_retries - 1:
-                wait_time = 2**attempt if "rate limit" in str(e).lower() or "429" in str(e) else 1
+                # Wait 60 seconds + exponential backoff for rate limits
+                wait_time = 60 + (2**attempt) * 10
+                print(f"Rate limit error (attempt {attempt + 1}/{max_retries}): {e}")
+                print(f"Waiting {wait_time}s for rate limit to reset...")
+                time.sleep(wait_time)
+            else:
+                raise
+        except Exception as e:
+            # Check for rate limit errors in string representation (for OpenAI or other cases)
+            is_rate_limit = "rate limit" in str(e).lower() or "429" in str(e)
+            if attempt < max_retries - 1:
+                if is_rate_limit:
+                    # For rate limits, wait longer
+                    wait_time = 60 + (2**attempt) * 10
+                else:
+                    # For other errors, use shorter exponential backoff
+                    wait_time = 2**attempt
                 print(f"Error (attempt {attempt + 1}/{max_retries}): {e}. Waiting {wait_time}s...")
                 time.sleep(wait_time)
             else:
@@ -172,6 +232,8 @@ def process_dataset(config):
                         {
                             "input": encoded_problem,
                             "output": f"Answer: {answer}" if answer else "Answer:",
+                            # Store original for filler token generation
+                            "original_problem": problem,
                         }
                     )
                 else:
@@ -179,6 +241,7 @@ def process_dataset(config):
                         {
                             "input": problem,
                             "output": f"Answer: {answer}" if answer else "Answer:",
+                            "original_problem": problem,
                         }
                     )
             else:
@@ -195,6 +258,8 @@ def process_dataset(config):
                                 if answer
                                 else encoded_solution
                             ),
+                            # Store original for filler token generation
+                            "original_problem": problem,
                         }
                     )
                 else:
@@ -202,6 +267,7 @@ def process_dataset(config):
                         {
                             "input": problem,
                             "output": (f"{solution}\n\\boxed{{{answer}}}" if answer else solution),
+                            "original_problem": problem,
                         }
                     )
     else:
@@ -219,14 +285,15 @@ def process_dataset(config):
         filler_count = filler_config.get("count", 300)
 
         for ex in few_shot_processed:
-            problem = ex["input"]
+            # Use original problem for filler token generation (not encoded input)
+            original_problem = ex.get("original_problem", ex["input"])
             filler_tokens = generate_filler_tokens(
                 filler_type,
                 filler_count,
-                problem=problem,
+                problem=original_problem if filler_type == "repeat" else None,
                 repeat_string=filler_config.get("string", None),
             )
-            ex["input"] = f"{problem}\n\n{filler_tokens}"
+            ex["input"] = f"{ex['input']}\n\n{filler_tokens}"
 
     # Process test examples
     test_processed = []
@@ -359,12 +426,30 @@ def run_single_experiment(config, results_base_dir=None):
             # Add prefill assistant message to force "Answer:" start
             messages.append({"role": "assistant", "content": "Answer:"})
             prompt_for_logging = f"Messages with {len(messages)} total messages"
+
+            # Estimate tokens and warn if very large
+            estimated_tokens = estimate_input_tokens(messages, provider)
+            if estimated_tokens > 20000:
+                print(
+                    f"\nWarning: Large prompt detected (~{estimated_tokens} estimated tokens). "
+                    f"This may hit rate limits. Consider reducing num_examples or filler count."
+                )
+
             response = call_llm(messages, provider, model, api_key)
         else:
             # OpenAI: build text prompt and append "\n\nAnswer:"
             prompt_text = format_prompt(few_shot_processed, scheme, provider="openai")
             prompt = f"{prompt_text}\n\nInput: {example['input']}\n\nAnswer:"
             prompt_for_logging = prompt
+
+            # Estimate tokens and warn if very large
+            estimated_tokens = estimate_input_tokens(prompt, provider)
+            if estimated_tokens > 20000:
+                print(
+                    f"\nWarning: Large prompt detected (~{estimated_tokens} estimated tokens). "
+                    f"This may hit rate limits. Consider reducing num_examples or filler count."
+                )
+
             response = call_llm(prompt, provider, model, api_key)
 
         try:
@@ -398,6 +483,22 @@ def run_single_experiment(config, results_base_dir=None):
         # Save after every example for better caching/resume capability
         with open(results_dir / "results_intermediate.json", "w") as f:
             json.dump(results, f, indent=2)
+
+        # Add adaptive delay between requests to avoid hitting rate limits
+        # Anthropic has a 30,000 input tokens/minute limit
+        if provider == "anthropic":
+            # Calculate delay based on estimated tokens to stay under 30k/min
+            # If we use ~estimated_tokens per request, we need at least:
+            # delay = (estimated_tokens / 30000) * 60 seconds
+            # Add a safety margin of 20%
+            if estimated_tokens > 0:
+                min_delay = (estimated_tokens / 30000) * 60 * 1.2
+                delay = max(2.0, min_delay)  # At least 2 seconds, but more if needed
+            else:
+                delay = 2.0
+            time.sleep(delay)
+        else:
+            time.sleep(0.5)  # Smaller delay for other providers
 
     # Save final results
     with open(results_dir / "results.json", "w") as f:
