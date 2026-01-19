@@ -33,24 +33,52 @@ def load_config(config_path: str):
         return yaml.safe_load(f)
 
 
-def call_llm(prompt: str, provider: str, model: str, api_key: str, max_retries: int = 5):
-    """Call LLM API with retries."""
+def call_llm(
+    prompt: str,
+    provider: str,
+    model: str,
+    api_key: str,
+    max_retries: int = 5,
+    assistant_prefill: Optional[str] = None,
+):
+    """Call LLM API with retries.
+
+    Args:
+        prompt: The user prompt
+        provider: The LLM provider ("openai" or "anthropic")
+        model: The model name
+        api_key: The API key
+        max_retries: Maximum number of retry attempts
+        assistant_prefill: Optional prefill text for assistant response (Anthropic only)
+    """
     for attempt in range(max_retries):
         try:
             if provider == "openai":
                 client = openai.OpenAI(api_key=api_key)
+                # For OpenAI, include prefill in the prompt text if provided
+                full_prompt = prompt
+                if assistant_prefill:
+                    full_prompt = f"{prompt} {assistant_prefill}"
                 response = client.chat.completions.create(
                     model=model,
-                    messages=[{"role": "user", "content": prompt}],
+                    messages=[{"role": "user", "content": full_prompt}],
                     temperature=0.0,
                 )
-                return response.choices[0].message.content or ""
+                response_text = response.choices[0].message.content or ""
+                # If we prefilled, prepend the prefill to the response
+                if assistant_prefill:
+                    return assistant_prefill + " " + response_text
+                return response_text
             elif provider == "anthropic":
                 client = anthropic.Anthropic(api_key=api_key)
+                messages: list = [{"role": "user", "content": prompt}]
+                # For Anthropic, use assistant message prefill if provided
+                if assistant_prefill:
+                    messages.append({"role": "assistant", "content": assistant_prefill})
                 response = client.messages.create(
                     model=model,
                     max_tokens=4096,
-                    messages=[{"role": "user", "content": prompt}],
+                    messages=messages,  # type: ignore
                     temperature=0.0,
                 )
                 # Extract text from Anthropic response blocks
@@ -58,6 +86,9 @@ def call_llm(prompt: str, provider: str, model: str, api_key: str, max_retries: 
                 for block in response.content:
                     if hasattr(block, "text"):
                         text_parts.append(getattr(block, "text", ""))
+                # If we prefilled, prepend the prefill to the response
+                if assistant_prefill:
+                    return assistant_prefill + " " + "".join(text_parts)
                 return "".join(text_parts)
             else:
                 raise ValueError(f"Unknown provider: {provider}")
@@ -109,9 +140,28 @@ def process_dataset(config):
         random.seed(42)
         random.shuffle(all_examples)
 
-        n_train = int(len(all_examples) * config["dataset"].get("train_split", 0.7))
+        # Only reserve what's needed for few-shot examples (with a small buffer)
+        # Since we're not actually training, we don't need 70% of the data
+        num_test_requested = config["dataset"]["num_test_examples"]
+        # Reserve enough for few-shot examples: use k * 3 as buffer, or use train_split if specified
+        if "train_split" in config["dataset"]:
+            n_train = int(len(all_examples) * config["dataset"]["train_split"])
+        else:
+            # Reserve only what's needed: k examples + small buffer (k * 2)
+            n_train = min(k * 3, int(len(all_examples) * 0.1))  # Cap at 10% max
+
         train_examples = all_examples[:n_train]
-        test_examples = all_examples[n_train : n_train + config["dataset"]["num_test_examples"]]
+        num_test_available = len(all_examples) - n_train
+        if num_test_requested > num_test_available:
+            print(
+                f"Warning: Requested {num_test_requested} test examples, "
+                f"but only {num_test_available} available after reserving "
+                f"{n_train} for few-shot examples ({len(all_examples)} total). "
+                f"Using {num_test_available} test examples."
+            )
+        test_examples = all_examples[
+            n_train : n_train + min(num_test_requested, num_test_available)
+        ]
 
         # Sample few-shot examples
         few_shot_examples = random.sample(train_examples, min(k, len(train_examples)))
@@ -149,8 +199,24 @@ def process_dataset(config):
         all_examples = load_math500_dataset(cache_dir="data/cache")
         random.seed(42)
         random.shuffle(all_examples)
-        n_train = int(len(all_examples) * config["dataset"].get("train_split", 0.7))
-        test_examples = all_examples[n_train : n_train + config["dataset"]["num_test_examples"]]
+        # Only reserve what's needed for few-shot examples (with a small buffer)
+        num_test_requested = config["dataset"]["num_test_examples"]
+        if "train_split" in config["dataset"]:
+            n_train = int(len(all_examples) * config["dataset"]["train_split"])
+        else:
+            # Reserve only what's needed: k examples + small buffer (k * 2)
+            n_train = min(k * 3, int(len(all_examples) * 0.1))  # Cap at 10% max
+        num_test_available = len(all_examples) - n_train
+        if num_test_requested > num_test_available:
+            print(
+                f"Warning: Requested {num_test_requested} test examples, "
+                f"but only {num_test_available} available after reserving "
+                f"{n_train} for few-shot examples ({len(all_examples)} total). "
+                f"Using {num_test_available} test examples."
+            )
+        test_examples = all_examples[
+            n_train : n_train + min(num_test_requested, num_test_available)
+        ]
 
     # For filler ciphers, append filler tokens to inputs dynamically
     if scheme_name == "filler" and "filler" in config["cipher"]:
@@ -242,6 +308,11 @@ def run_single_experiment(config, results_base_dir=None):
     # Process dataset
     test_examples, few_shot_prompt = process_dataset(config)
 
+    # Get encoding scheme to check if we should prefill "Answer: " for direct/filler ciphers
+    scheme_name = config["cipher"]["type"]
+    scheme = get_encoding_scheme(scheme_name, **config["cipher"].get("params", {}))
+    should_prefill_answer = scheme.get("is_direct", False)
+
     # Create results directory
     if results_base_dir is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -284,10 +355,15 @@ def run_single_experiment(config, results_base_dir=None):
         total=len(test_examples),
     ):
         i = len(results["responses"]) + 1
+        # For direct/filler ciphers, prefill "Answer:" to guide the model
+        # For Anthropic, use assistant message prefill; for OpenAI, include in prompt
+        assistant_prefill: Optional[str] = "Answer:" if should_prefill_answer else None
         prompt = f"{few_shot_prompt}\n\nInput: {example['input']}\nOutput:"
 
         try:
-            response = call_llm(prompt, provider, model, api_key)
+            response = call_llm(
+                prompt, provider, model, api_key, assistant_prefill=assistant_prefill
+            )
             results["responses"].append(
                 {
                     "example_index": i - 1,
@@ -375,11 +451,34 @@ def run_experiment(config):
                 experiment_num += 1
                 cipher_type = cipher_config["type"]
 
-                # For filler ciphers, include the filler subtype and count in the directory name
+                # For filler ciphers, include all filler sub-settings in the directory name
                 if cipher_type == "filler" and "filler" in cipher_config:
-                    filler_subtype = cipher_config["filler"].get("type", "unknown")
-                    filler_count = cipher_config["filler"].get("count", "unknown")
-                    cipher_dir_name = f"{cipher_type}_{filler_subtype}_{filler_count}"
+                    filler_config = cipher_config["filler"]
+                    filler_parts = [cipher_type]
+
+                    # Add type (required)
+                    if "type" in filler_config:
+                        filler_parts.append(filler_config["type"])
+
+                    # Add all other parameters, with count last
+                    other_params = {k: v for k, v in filler_config.items() if k != "type"}
+                    # Separate count from other params
+                    count_value = other_params.pop("count", None)
+                    other_params_list = [(k, v) for k, v in sorted(other_params.items())]
+
+                    # Add non-count params first (sorted)
+                    for key, value in other_params_list:
+                        # Skip None/empty values, but include 0
+                        if value is not None and value != "":
+                            # Sanitize value for filesystem (replace spaces/special chars)
+                            value_str = str(value).replace(" ", "_").replace("/", "_")
+                            filler_parts.append(value_str)
+
+                    # Add count last
+                    if count_value is not None:
+                        filler_parts.append(str(count_value))
+
+                    cipher_dir_name = "_".join(filler_parts)
                 else:
                     cipher_dir_name = cipher_type
 
