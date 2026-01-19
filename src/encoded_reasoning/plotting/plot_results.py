@@ -629,14 +629,17 @@ def plot_matrix_results(base_dir: str | Path, config: dict | None = None):
                         fontweight="bold",
                     )
 
+        # Get n values for title
+        n_values = [exp["n"] for exp in experiments]
+        n_str = (
+            f"n={n_values[0]}" if len(set(n_values)) == 1 else f"n={min(n_values)}-{max(n_values)}"
+        )
+
         # Customize plot
         ax.set_xlabel("Experiment Type", fontsize=12, fontweight="bold")
         ax.set_ylabel("Score", fontsize=12, fontweight="bold")
-        ax.set_title(
-            "Accuracy vs Adherence vs Ratio Across Experiments (Multiple Models)",
-            fontsize=14,
-            fontweight="bold",
-        )
+        title = f"Accuracy vs Adherence vs Ratio Across Experiments (Multiple Models, {n_str})"
+        ax.set_title(title, fontsize=14, fontweight="bold")
         ax.set_xticks(x_pos)
         # Clean up labels for display (remove common prefixes, make readable)
         display_labels = []
@@ -732,14 +735,17 @@ def plot_matrix_results(base_dir: str | Path, config: dict | None = None):
             hatch="..",
         )
 
+        # Get n values for title
+        n_values = [exp["n"] for exp in experiments]
+        n_str = (
+            f"n={n_values[0]}" if len(set(n_values)) == 1 else f"n={min(n_values)}-{max(n_values)}"
+        )
+
         # Customize plot
         ax.set_xlabel("Experiment", fontsize=12, fontweight="bold")
         ax.set_ylabel("Score", fontsize=12, fontweight="bold")
-        ax.set_title(
-            "Accuracy vs Adherence vs Ratio Across Experiments",
-            fontsize=14,
-            fontweight="bold",
-        )
+        title = f"Accuracy vs Adherence vs Ratio Across Experiments ({n_str})"
+        ax.set_title(title, fontsize=14, fontweight="bold")
         ax.set_xticks(x_pos)
         ax.set_xticklabels([exp["label"] for exp in experiments], rotation=45, ha="right")
         ax.set_ylim(0, 1.1)
@@ -983,14 +989,17 @@ def plot_matrix_results_ratio_only(base_dir: str | Path, config: dict | None = N
                         fontweight="bold",
                     )
 
+        # Get n values for title
+        n_values = [exp["n"] for exp in experiments]
+        n_str = (
+            f"n={n_values[0]}" if len(set(n_values)) == 1 else f"n={min(n_values)}-{max(n_values)}"
+        )
+
         # Customize plot
         ax.set_xlabel("Experiment Type", fontsize=12, fontweight="bold")
         ax.set_ylabel("Adh&Corr/IdAcc Ratio", fontsize=12, fontweight="bold")
-        ax.set_title(
-            "Adherent & Correct / Identity Accuracy Ratio Across Experiments",
-            fontsize=14,
-            fontweight="bold",
-        )
+        title = f"Adherent & Correct / Identity Accuracy Ratio Across Experiments ({n_str})"
+        ax.set_title(title, fontsize=14, fontweight="bold")
         ax.set_xticks(x_pos)
         # Clean up labels for display (remove common prefixes, make readable)
         display_labels = []
@@ -1087,14 +1096,17 @@ def plot_matrix_results_ratio_only(base_dir: str | Path, config: dict | None = N
             linewidth=1.5,
         )
 
+        # Get n values for title
+        n_values = [exp["n"] for exp in experiments]
+        n_str = (
+            f"n={n_values[0]}" if len(set(n_values)) == 1 else f"n={min(n_values)}-{max(n_values)}"
+        )
+
         # Customize plot
         ax.set_xlabel("Experiment", fontsize=12, fontweight="bold")
         ax.set_ylabel("Adh&Corr/IdAcc Ratio", fontsize=12, fontweight="bold")
-        ax.set_title(
-            "Adherent & Correct / Identity Accuracy Ratio Across Experiments",
-            fontsize=14,
-            fontweight="bold",
-        )
+        title = f"Adherent & Correct / Identity Accuracy Ratio Across Experiments ({n_str})"
+        ax.set_title(title, fontsize=14, fontweight="bold")
         ax.set_xticks(x_pos)
         ax.set_xticklabels([exp["label"] for exp in experiments], rotation=45, ha="right")
         max_ratio = max((exp["ratio"] + exp["ratio_err"] for exp in experiments), default=1.1)
