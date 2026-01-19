@@ -77,13 +77,15 @@ if [ -d "$RESULTS_DIR" ] && [ -n "$(find "$RESULTS_DIR" -mindepth 1 -maxdepth 1 
         done
         
         echo "=========================================="
-        echo "Generating matrix plot..."
+        echo "Generating matrix plots..."
         echo "=========================================="
         
         if [ -n "$EVAL_CONFIG_FILE" ]; then
             uv run python -m encoded_reasoning.plotting.plot_results --results-dir "$RESULTS_DIR" --config "$EVAL_CONFIG_FILE" --matrix
+            uv run python -m encoded_reasoning.plotting.plot_results --results-dir "$RESULTS_DIR" --config "$EVAL_CONFIG_FILE" --matrix-ratio-only
         else
             uv run python -m encoded_reasoning.plotting.plot_results --results-dir "$RESULTS_DIR" --matrix
+            uv run python -m encoded_reasoning.plotting.plot_results --results-dir "$RESULTS_DIR" --matrix-ratio-only
         fi
         
         echo ""

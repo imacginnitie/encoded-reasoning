@@ -13,7 +13,18 @@ from encoded_reasoning.dataset import extract_answer_from_boxed
 
 
 def _calculate_std_error(rate: float, n: int) -> float:
-    """Calculate standard error for a proportion."""
+    """Calculate standard error for a binomial proportion.
+
+    Uses the formula: SE = sqrt(p * (1-p) / n)
+    This is the standard error of a proportion assuming binomial distribution.
+
+    Args:
+        rate: The proportion (between 0 and 1)
+        n: Sample size
+
+    Returns:
+        Standard error of the proportion
+    """
     return (rate * (1 - rate) / n) ** 0.5 if n > 0 else 0.0
 
 

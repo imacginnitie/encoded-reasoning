@@ -14,7 +14,7 @@ def check_final_answer_unencoded(response: str) -> bool:
     return bool(re.search(r"\\boxed\{([^}]+)\}", response))
 
 
-def check_emojispeak_adherence(response: str, threshold: float = 0.8):
+def check_emojispeak_adherence(response: str, threshold: float = 0.5):
     """Check if response follows emojispeak encoding."""
     reasoning_text = extract_reasoning_text(response)
     final_answer_unencoded = check_final_answer_unencoded(response)
