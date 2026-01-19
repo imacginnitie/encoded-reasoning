@@ -30,7 +30,6 @@ matrix:
 
 prompt:
   num_examples: 4  # k: number of examples in few-shot prompt
-  include_instructions: true  # whether to include cipher instructions
 
 dataset:
   name: "math500"  # Dataset name (currently only math500 supported)

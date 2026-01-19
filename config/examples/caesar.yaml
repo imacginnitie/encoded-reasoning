@@ -10,7 +10,6 @@ cipher:
 
 prompt:
   num_examples: 5
-  include_instructions: true
 
 dataset:
   name: "math500"

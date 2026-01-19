@@ -15,22 +15,59 @@ matrix:
   models:
     - provider: "anthropic"
       name: "claude-sonnet-4-5"
-    # - provider: "openai"
-    #   name: "gpt-4o"
+    - provider: "openai"
+      name: "gpt-4o"
   ciphers:
     - type: "identity"
       params: {}
     - type: "emojispeak"
       params: {}
+    - type: "direct"
+      params: {}
+    - type: "filler"
+      params: {}
+      filler:
+        type: "counting"
+        count: 300
+    - type: "filler"
+      params: {}
+      filler:
+        type: "lorem"
+        count: 300
+    - type: "filler"
+      params: {}
+      filler:
+        type: "baseline_neutral"
+        count: 300
+    - type: "filler"
+      params: {}
+      filler:
+        type: "positive_personal"
+        count: 300
+    - type: "filler"
+      params: {}
+      filler:
+        type: "positive_general"
+        count: 300
+    - type: "filler"
+      params: {}
+      filler:
+        type: "negative_personal"
+        count: 300
+    - type: "filler"
+      params: {}
+      filler:
+        type: "negative_general"
+        count: 300
+
 
 
 prompt:
   num_examples: 4  # k: number of examples in few-shot prompt
-  include_instructions: true  # whether to include cipher instructions
 
 dataset:
   name: "math500"  # Dataset name (currently only math500 supported)
-  num_test_examples: 50  # n: number of examples to test on (max 500 for MATH 500)
+  num_test_examples: 2  # n: number of examples to test on (max 500 for MATH 500)
 
 experiment:
   output_dir: "results"  # base directory for results (will create subdirs for each model/cipher combination)

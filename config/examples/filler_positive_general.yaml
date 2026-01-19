@@ -1,0 +1,27 @@
+# Example: Filler tokens mode with positive general text (about problem being easy)
+# Based on Redwood Research blog post:
+# https://blog.redwoodresearch.org/p/recent-llms-can-use-filler-tokens
+model:
+  provider: "anthropic"
+  name: "claude-3-5-sonnet-20241022"
+
+cipher:
+  type: "filler"  # Filler token mode - no CoT, only final answer with filler tokens
+  params: {}
+  filler:
+    type: "positive_general"  # Options: "counting", "dots", "lorem", "repeat", "baseline_neutral", "positive_personal", "positive_general", "negative_personal", "negative_general"
+    count: 300  # Number of filler tokens (words) to generate
+
+prompt:
+  num_examples: 5
+
+dataset:
+  name: "math500"
+  num_test_examples: 100
+  train_split: 0.7
+  val_split: 0.15
+  test_split: 0.15
+
+experiment:
+  output_dir: "results"
+

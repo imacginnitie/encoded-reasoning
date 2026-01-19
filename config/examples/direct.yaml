@@ -1,10 +1,10 @@
-# Example: Identity (baseline) experiment - no encoding
+# Example: Direct answering mode - no chain-of-thought, only boxed answer
 model:
   provider: "anthropic"
   name: "claude-3-5-sonnet-20241022"
 
 cipher:
-  type: "identity"  # No encoding - baseline for comparison
+  type: "direct"  # Direct answering mode - no CoT, only final answer
   params: {}
 
 prompt:

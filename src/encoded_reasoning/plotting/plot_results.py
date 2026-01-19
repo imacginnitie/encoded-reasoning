@@ -289,6 +289,164 @@ def plot_results(results_dir: str | Path, config: dict | None = None):
             print("ℹ No identity baseline found - skipping ratio plot")
 
 
+def plot_matrix_results(base_dir: str | Path, config: dict | None = None):
+    """Plot accuracy and adherence for a matrix of experiments on one graph.
+
+    Args:
+        base_dir: Base directory containing experiment results. Can be:
+            - A timestamp directory (e.g., results/20260112_081513) containing
+              subdirectories like <provider>/<model>/<cipher>/results.json
+            - A directory containing multiple experiment directories with results.json
+        config: Optional configuration dict (currently unused but kept for API consistency)
+    """
+    base_dir = Path(base_dir)
+
+    # Find all results.json files
+    results_files = list(base_dir.rglob("results.json"))
+
+    if not results_files:
+        print(f"Warning: No results.json files found in {base_dir}")
+        return
+
+    # Load all experiment results
+    experiments = []
+    for results_file in sorted(results_files):
+        try:
+            results = json.loads(results_file.read_text())
+            metrics = results.get("metrics", {})
+
+            if not metrics:
+                continue
+
+            # Extract experiment info
+            exp_dir = results_file.parent
+            cipher_type = results.get("config", {}).get("cipher", {}).get("type", "unknown")
+            model_name = results.get("config", {}).get("model", {}).get("name", "unknown")
+            provider = results.get("config", {}).get("model", {}).get("provider", "unknown")
+
+            # Create label from directory structure or config
+            # Try to extract meaningful label from path: <provider>/<model>/<cipher>
+            parts = exp_dir.parts
+            label_parts = []
+            if "results" in parts:
+                results_idx = parts.index("results")
+                if results_idx + 4 < len(parts):
+                    # Structure: .../results/<timestamp>/<provider>/<model>/<cipher>
+                    cipher_part = parts[results_idx + 4]
+                    label_parts = [cipher_part]
+                elif len(parts) >= 1:
+                    # Try to get last part as cipher name
+                    label_parts = [parts[-1]]
+
+            if not label_parts:
+                label = f"{cipher_type}"
+            else:
+                label = label_parts[0]
+
+            experiments.append(
+                {
+                    "label": label,
+                    "cipher": cipher_type,
+                    "model": model_name,
+                    "provider": provider,
+                    "accuracy": metrics.get("accuracy", 0.0),
+                    "accuracy_err": metrics.get("accuracy_std_error", 0.0),
+                    "adherence": metrics.get("adherence_rate", 0.0),
+                    "adherence_err": metrics.get("adherence_std_error", 0.0),
+                    "n": metrics.get("n", 0),
+                }
+            )
+        except Exception as e:
+            print(f"Warning: Failed to load {results_file}: {e}")
+            continue
+
+    # Check if we have multiple models - if so, include model in label
+    unique_models = set(exp["model"] for exp in experiments)
+    if len(unique_models) > 1:
+        for exp in experiments:
+            exp["label"] = f"{exp['model']}/{exp['label']}"
+
+    if not experiments:
+        print(f"Warning: No valid experiment results found in {base_dir}")
+        return
+
+    # Create the plot
+    fig, ax = plt.subplots(figsize=(max(12, len(experiments) * 0.8), 8))
+
+    x_pos = np.arange(len(experiments))
+    width = 0.35  # Width of bars
+
+    # Plot bars
+    ax.bar(
+        x_pos - width / 2,
+        [exp["accuracy"] for exp in experiments],
+        width,
+        yerr=[exp["accuracy_err"] for exp in experiments],
+        label="Accuracy (% Correct)",
+        color="steelblue",
+        alpha=0.7,
+        capsize=5,
+        edgecolor="black",
+        linewidth=1.5,
+    )
+
+    ax.bar(
+        x_pos + width / 2,
+        [exp["adherence"] for exp in experiments],
+        width,
+        yerr=[exp["adherence_err"] for exp in experiments],
+        label="Adherence Rate",
+        color="coral",
+        alpha=0.7,
+        capsize=5,
+        edgecolor="black",
+        linewidth=1.5,
+    )
+
+    # Customize plot
+    ax.set_xlabel("Experiment", fontsize=12, fontweight="bold")
+    ax.set_ylabel("Score", fontsize=12, fontweight="bold")
+    ax.set_title("Accuracy vs Adherence Across Experiments", fontsize=14, fontweight="bold")
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels([exp["label"] for exp in experiments], rotation=45, ha="right")
+    ax.set_ylim(0, 1.1)
+    ax.legend(fontsize=11)
+    ax.grid(True, alpha=0.3, axis="y")
+    ax.axhline(y=1.0, color="green", linestyle="--", alpha=0.5)
+
+    # Add value labels on bars
+    for i, exp in enumerate(experiments):
+        # Accuracy label
+        ax.text(
+            i - width / 2,
+            exp["accuracy"] + exp["accuracy_err"] + 0.02,
+            f"{exp['accuracy']:.2f}",
+            ha="center",
+            va="bottom",
+            fontsize=9,
+            fontweight="bold",
+        )
+        # Adherence label
+        ax.text(
+            i + width / 2,
+            exp["adherence"] + exp["adherence_err"] + 0.02,
+            f"{exp['adherence']:.2f}",
+            ha="center",
+            va="bottom",
+            fontsize=9,
+            fontweight="bold",
+        )
+
+    plt.tight_layout()
+
+    # Save plot
+    output_path = base_dir / "matrix_plot.png"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    print(f"✓ Matrix plot saved to {output_path}")
+    plt.close()
+
+
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(description="Plot experiment results")
@@ -304,13 +462,21 @@ def main():
         default=None,
         help="Optional path to evaluation config file (for additional settings)",
     )
+    parser.add_argument(
+        "--matrix",
+        action="store_true",
+        help="Plot matrix of experiments (accuracy and adherence for all experiments in directory)",
+    )
     args = parser.parse_args()
 
     config = {}
     if args.config:
         config = load_config(args.config)
 
-    plot_results(args.results_dir, config)
+    if args.matrix:
+        plot_matrix_results(args.results_dir, config)
+    else:
+        plot_results(args.results_dir, config)
 
 
 if __name__ == "__main__":
