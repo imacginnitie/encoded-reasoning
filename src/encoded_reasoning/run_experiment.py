@@ -33,24 +33,44 @@ def load_config(config_path: str):
         return yaml.safe_load(f)
 
 
-def call_llm(prompt: str, provider: str, model: str, api_key: str, max_retries: int = 5):
-    """Call LLM API with retries."""
+def call_llm(messages_or_prompt, provider: str, model: str, api_key: str, max_retries: int = 5):
+    """Call LLM API with retries.
+
+    Args:
+        messages_or_prompt: For Anthropic, a list of message dicts. For OpenAI, a string prompt.
+        provider: "openai" or "anthropic"
+        model: Model name
+        api_key: API key
+        max_retries: Maximum number of retries
+    """
     for attempt in range(max_retries):
         try:
             if provider == "openai":
                 client = openai.OpenAI(api_key=api_key)
+                # OpenAI expects messages format
+                if isinstance(messages_or_prompt, str):
+                    messages = [{"role": "user", "content": messages_or_prompt}]
+                else:
+                    # Type cast for OpenAI messages
+                    messages = messages_or_prompt  # type: ignore
                 response = client.chat.completions.create(
                     model=model,
-                    messages=[{"role": "user", "content": prompt}],
+                    messages=messages,  # type: ignore
                     temperature=0.0,
                 )
                 return response.choices[0].message.content or ""
             elif provider == "anthropic":
                 client = anthropic.Anthropic(api_key=api_key)
+                # Anthropic expects messages format
+                if isinstance(messages_or_prompt, str):
+                    messages = [{"role": "user", "content": messages_or_prompt}]
+                else:
+                    # Type cast for Anthropic messages
+                    messages = messages_or_prompt  # type: ignore
                 response = client.messages.create(
                     model=model,
                     max_tokens=4096,
-                    messages=[{"role": "user", "content": prompt}],
+                    messages=messages,  # type: ignore
                     temperature=0.0,
                 )
                 # Extract text from Anthropic response blocks
@@ -71,19 +91,40 @@ def call_llm(prompt: str, provider: str, model: str, api_key: str, max_retries: 
     raise RuntimeError("Failed after retries")
 
 
-def format_prompt(examples, encoding_scheme):
-    """Format few-shot prompt."""
-    parts = []
+def format_prompt(examples, encoding_scheme, provider="anthropic"):
+    """Format few-shot prompt as messages (for Anthropic) or text (for OpenAI)."""
+    messages = []
 
+    # Add system message with instructions if present
     if "instruction" in encoding_scheme:
-        parts.append(f"Instructions: {encoding_scheme['instruction']}\n")
+        messages.append({"role": "user", "content": encoding_scheme["instruction"]})
+        messages.append(
+            {
+                "role": "assistant",
+                "content": "I understand. I will answer in the format 'Answer: [ANSWER]'.",
+            }
+        )
 
-    parts.append("Examples:")
+    # Add few-shot examples as user→assistant pairs
     for ex in examples:
-        parts.append(f"Input: {ex['input']}")
-        parts.append(f"Output: {ex['output']}\n")
+        messages.append({"role": "user", "content": ex["input"]})
+        messages.append({"role": "assistant", "content": ex["output"]})
 
-    return "\n".join(parts)
+    if provider == "openai":
+        # Convert messages to text format for OpenAI
+        parts = []
+        if "instruction" in encoding_scheme:
+            parts.append(f"Instructions: {encoding_scheme['instruction']}\n")
+        parts.append("Examples:")
+        for i in range(0, len(messages), 2):
+            if messages[i]["role"] == "user":
+                parts.append(f"Input: {messages[i]['content']}")
+                if i + 1 < len(messages):
+                    parts.append(f"Output: {messages[i + 1]['content']}\n")
+        return "\n".join(parts)
+    else:
+        # Return messages list for Anthropic
+        return messages
 
 
 def process_dataset(config):
@@ -123,27 +164,46 @@ def process_dataset(config):
             solution = ex.get("solution", "")
             answer = extract_answer_from_boxed(ex.get("answer", ""))
 
-            if scheme.get("is_programmatic", True):
-                encoded_problem = scheme["encode"](problem)
-                encoded_solution = scheme["encode"](solution) if solution else ""
-                encoded_answer = scheme["encode"](answer) if answer else ""
-                few_shot_processed.append(
-                    {
-                        "input": encoded_problem,
-                        "output": (
-                            f"{encoded_solution}\n\\boxed{{{encoded_answer}}}"
-                            if answer
-                            else encoded_solution
-                        ),
-                    }
-                )
+            # For direct/filler schemes, use "Answer: <number>" format
+            if scheme.get("is_direct", False):
+                if scheme.get("is_programmatic", True):
+                    encoded_problem = scheme["encode"](problem)
+                    few_shot_processed.append(
+                        {
+                            "input": encoded_problem,
+                            "output": f"Answer: {answer}" if answer else "Answer:",
+                        }
+                    )
+                else:
+                    few_shot_processed.append(
+                        {
+                            "input": problem,
+                            "output": f"Answer: {answer}" if answer else "Answer:",
+                        }
+                    )
             else:
-                few_shot_processed.append(
-                    {
-                        "input": problem,
-                        "output": (f"{solution}\n\\boxed{{{answer}}}" if answer else solution),
-                    }
-                )
+                # For other schemes, use the original format
+                if scheme.get("is_programmatic", True):
+                    encoded_problem = scheme["encode"](problem)
+                    encoded_solution = scheme["encode"](solution) if solution else ""
+                    encoded_answer = scheme["encode"](answer) if answer else ""
+                    few_shot_processed.append(
+                        {
+                            "input": encoded_problem,
+                            "output": (
+                                f"{encoded_solution}\n\\boxed{{{encoded_answer}}}"
+                                if answer
+                                else encoded_solution
+                            ),
+                        }
+                    )
+                else:
+                    few_shot_processed.append(
+                        {
+                            "input": problem,
+                            "output": (f"{solution}\n\\boxed{{{answer}}}" if answer else solution),
+                        }
+                    )
     else:
         # If using pre-made examples, still need to load test examples
         all_examples = load_math500_dataset(cache_dir="data/cache")
@@ -208,12 +268,13 @@ def process_dataset(config):
     save_processed_dataset(few_shot_processed, output_dir / "few_shot.jsonl")
     save_processed_dataset(test_processed, output_dir / "test.jsonl")
 
-    # Create prompt
-    prompt = format_prompt(few_shot_processed, scheme)
-    with open(output_dir / "few_shot_prompt.txt", "w") as f:
-        f.write(prompt)
+    # Create prompt (text format for saving to file)
+    prompt_text = format_prompt(few_shot_processed, scheme, provider="openai")
+    if isinstance(prompt_text, str):
+        with open(output_dir / "few_shot_prompt.txt", "w") as f:
+            f.write(prompt_text)
 
-    return test_processed, prompt
+    return test_processed, few_shot_processed, scheme
 
 
 def get_api_key(provider: str) -> Optional[str]:
@@ -240,7 +301,7 @@ def run_single_experiment(config, results_base_dir=None):
         )
 
     # Process dataset
-    test_examples, few_shot_prompt = process_dataset(config)
+    test_examples, few_shot_processed, scheme = process_dataset(config)
 
     # Create results directory
     if results_base_dir is None:
@@ -284,10 +345,33 @@ def run_single_experiment(config, results_base_dir=None):
         total=len(test_examples),
     ):
         i = len(results["responses"]) + 1
-        prompt = f"{few_shot_prompt}\n\nInput: {example['input']}\nOutput:"
+
+        # Build prompt/messages based on provider
+        if provider == "anthropic":
+            # Build messages with few-shot examples and prefill
+            messages_list = format_prompt(few_shot_processed, scheme, provider="anthropic")
+            # Type assertion: format_prompt returns list for anthropic
+            if not isinstance(messages_list, list):
+                raise ValueError("Expected list of messages for Anthropic provider")
+            messages = messages_list
+            # Add test problem as user message
+            messages.append({"role": "user", "content": example["input"]})
+            # Add prefill assistant message to force "Answer:" start
+            messages.append({"role": "assistant", "content": "Answer:"})
+            prompt_for_logging = f"Messages with {len(messages)} total messages"
+            response = call_llm(messages, provider, model, api_key)
+        else:
+            # OpenAI: build text prompt and append "\n\nAnswer:"
+            prompt_text = format_prompt(few_shot_processed, scheme, provider="openai")
+            prompt = f"{prompt_text}\n\nInput: {example['input']}\n\nAnswer:"
+            prompt_for_logging = prompt
+            response = call_llm(prompt, provider, model, api_key)
 
         try:
-            response = call_llm(prompt, provider, model, api_key)
+            # Handle "Answer:" prefix - strip it if present
+            if response.startswith("Answer:"):
+                response = response[7:].strip()  # Remove "Answer:" and leading whitespace
+
             results["responses"].append(
                 {
                     "example_index": i - 1,
@@ -295,7 +379,7 @@ def run_single_experiment(config, results_base_dir=None):
                     "expected_answer": example.get("expected_answer", ""),
                     "original_problem": example.get("original_problem", ""),
                     "response": response,
-                    "prompt": prompt,
+                    "prompt": prompt_for_logging,
                 }
             )
         except Exception as e:

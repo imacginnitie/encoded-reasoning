@@ -69,6 +69,8 @@ def _calculate_ratio_error(numerator, num_err, denominator, denom_err):
     """Calculate error propagation for ratio: num/denom."""
     if denominator == 0:
         return 0.0
+    if numerator == 0:
+        return 0.0
     # Using standard error propagation for division
     ratio = numerator / denominator
     relative_err = ((num_err / numerator) ** 2 + (denom_err / denominator) ** 2) ** 0.5

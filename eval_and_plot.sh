@@ -77,6 +77,17 @@ if [ -d "$RESULTS_DIR" ] && [ -n "$(find "$RESULTS_DIR" -mindepth 1 -maxdepth 1 
         done
         
         echo "=========================================="
+        echo "Generating matrix plot..."
+        echo "=========================================="
+        
+        if [ -n "$EVAL_CONFIG_FILE" ]; then
+            uv run python -m encoded_reasoning.plotting.plot_results --results-dir "$RESULTS_DIR" --config "$EVAL_CONFIG_FILE" --matrix
+        else
+            uv run python -m encoded_reasoning.plotting.plot_results --results-dir "$RESULTS_DIR" --matrix
+        fi
+        
+        echo ""
+        echo "=========================================="
         echo "All experiments processed!"
         echo "=========================================="
         exit 0

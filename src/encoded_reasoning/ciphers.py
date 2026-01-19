@@ -187,6 +187,7 @@ NEGATIVE_GENERAL = (
     "deliberately tricky and misleading. Success here is mostly luck."
 )
 
+
 def generate_filler_tokens(
     filler_type: str,
     count: int,
@@ -304,9 +305,9 @@ def get_encoding_scheme(name: str, **kwargs):
             "is_programmatic": True,
             "is_direct": True,  # Special flag for direct answering (no CoT)
             "instruction": (
-                "You must answer directly without showing any reasoning or chain-of-thought. "
-                "Provide ONLY the final answer in \\boxed{} format. "
-                "Do not include any explanation, calculation steps, or intermediate reasoning."
+                "You will be given a math problem. Answer immediately using the format "
+                "'Answer: [ANSWER]' where [ANSWER] is just the final answer, nothing else. "
+                "No explanation, no words, no reasoning, just the answer."
             ),
         },
         "filler": {
@@ -316,9 +317,9 @@ def get_encoding_scheme(name: str, **kwargs):
             "is_direct": True,  # Also direct answering (no CoT)
             "is_filler": True,  # Special flag for filler token mode
             "instruction": (
-                "You must answer directly without showing any reasoning or chain-of-thought. "
-                "Provide ONLY the final answer in \\boxed{} format. "
-                "Do not include any explanation, calculation steps, or intermediate reasoning. "
+                "You will be given a math problem. Answer immediately using the format "
+                "'Answer: [ANSWER]' where [ANSWER] is just the final answer, nothing else. "
+                "No explanation, no words, no reasoning, just the answer. "
                 "After the problem, there will be filler tokens to give you extra space to "
                 "process the problem before answering."
             ),

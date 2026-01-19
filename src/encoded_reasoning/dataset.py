@@ -22,8 +22,18 @@ def load_math500_dataset(cache_dir=None, split=None):
 
 
 def extract_answer_from_boxed(text: str) -> str:
-    """Extract answer from \\boxed{} format, handling nested braces."""
-    # Find all \\boxed{...} patterns, handling nested braces
+    """Extract answer from \\boxed{} format or "Answer: <number>" format, handling nested braces."""
+    # First, try to extract from "Answer: <number>" format (for direct/filler schemes)
+    answer_match = re.search(r"Answer:\s*(.+)", text, re.IGNORECASE)
+    if answer_match:
+        answer = answer_match.group(1).strip()
+        # Normalize whitespace: remove spaces after commas and around parentheses
+        answer = re.sub(r",\s+", ",", answer)  # Remove space after comma
+        answer = re.sub(r"\(\s+", "(", answer)  # Remove space after opening paren
+        answer = re.sub(r"\s+\)", ")", answer)  # Remove space before closing paren
+        return answer
+
+    # Fall back to \\boxed{} format
     pattern = r"\\boxed\{"
     matches = []
     start = 0
@@ -55,6 +65,17 @@ def extract_answer_from_boxed(text: str) -> str:
         answer = re.sub(r"\(\s+", "(", answer)  # Remove space after opening paren
         answer = re.sub(r"\s+\)", ")", answer)  # Remove space before closing paren
         return answer
+
+    # If no format found, return the text as-is (might be a plain answer)
+    # This handles cases where we've already stripped "Answer:" prefix
+    if text.strip():
+        answer = text.strip()
+        # Normalize whitespace: remove spaces after commas and around parentheses
+        answer = re.sub(r",\s+", ",", answer)  # Remove space after comma
+        answer = re.sub(r"\(\s+", "(", answer)  # Remove space after opening paren
+        answer = re.sub(r"\s+\)", ")", answer)  # Remove space before closing paren
+        return answer
+
     return ""
 
 

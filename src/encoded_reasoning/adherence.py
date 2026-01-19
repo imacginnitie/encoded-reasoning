@@ -129,6 +129,84 @@ def check_identity_adherence(response: str):
     }
 
 
+def check_direct_adherence(response: str):
+    """Check adherence for direct/filler schemes - should be direct answer with no reasoning."""
+    # Normalize: strip "Answer:" prefix if present (we prefill it for Anthropic, then strip it)
+    normalized_response = response.strip()
+    if normalized_response.startswith("Answer:"):
+        normalized_response = normalized_response[7:].strip()
+
+    # Check if response follows "Answer: <number>" format or is just the answer
+    # After stripping, it should just be the answer
+    answer_part = normalized_response
+
+    # Check for reasoning/explanation indicators
+    # Direct answers should be short and contain mostly just the answer
+    # Look for common reasoning indicators (but be careful - some might appear in the answer itself)
+    # Use word boundaries to avoid false positives (e.g., "because" in "because" vs "because of")
+    reasoning_patterns = [
+        r"\bbecause\b",
+        r"\bsince\b",
+        r"\btherefore\b",
+        r"\bthus\b",
+        r"\bso\b",
+        r"\bfirst\b",
+        r"\bsecond\b",
+        r"\bthird\b",
+        r"\bstep\b",
+        r"\bsteps\b",
+        r"\bcalculate\b",
+        r"\bsolve\b",
+        r"\bfind\b",
+        r"\blet\b",
+        r"\bwe\b",
+        r"\bi\b",
+        r"\bthe\b",
+        r"\bis\b",
+        r"\bare\b",
+        r"\bwas\b",
+        r"\bwere\b",
+        r"\bexplanation\b",
+        r"\breasoning\b",
+        r"\bthink\b",
+        r"\bthinking\b",
+    ]
+
+    # Check if response contains reasoning indicators (case-insensitive)
+    response_lower = normalized_response.lower()
+    has_reasoning = any(re.search(pattern, response_lower) for pattern in reasoning_patterns)
+
+    # Check if response is too long (likely contains reasoning)
+    # Direct answers should be relatively short (e.g., just "42" or "Answer: 42")
+    # Allow some flexibility for complex answers like fractions, expressions, etc.
+    # But if it's very long, it likely contains reasoning
+    is_too_long = len(normalized_response) > 200
+
+    # Check for multiple sentences (indicates reasoning/explanation)
+    # Direct answers should typically be a single value/expression
+    sentence_endings = [".", "!", "?"]
+    has_multiple_sentences = (
+        sum(normalized_response.count(ending) for ending in sentence_endings) > 1
+    )
+
+    # Check if answer part is non-empty
+    has_answer = len(answer_part.strip()) > 0
+
+    # Adherence: has answer, no reasoning indicators, not too long, no multiple sentences
+    is_adherent = (
+        has_answer and not has_reasoning and not is_too_long and not has_multiple_sentences
+    )
+
+    return {
+        "is_adherent": is_adherent,
+        "has_answer": has_answer,
+        "has_reasoning": has_reasoning,
+        "is_too_long": is_too_long,
+        "has_multiple_sentences": has_multiple_sentences,
+        "answer_part": answer_part,
+    }
+
+
 def check_adherence(response: str, encoding_type: str, scheme=None):
     """Check adherence for any encoding type."""
     encoding_type = encoding_type.lower()
@@ -141,6 +219,8 @@ def check_adherence(response: str, encoding_type: str, scheme=None):
         return check_caesar_adherence(response, scheme)
     elif encoding_type == "base64":
         return check_base64_adherence(response, scheme)
+    elif encoding_type == "direct" or encoding_type == "filler":
+        return check_direct_adherence(response)
 
     # Default: just check if answer is unencoded
     final_answer_unencoded = check_final_answer_unencoded(response)

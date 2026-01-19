@@ -1,22 +1,10 @@
-# Experiment configuration
-# You can use either single model/cipher OR matrix configuration (not both)
 
-# Option 1: Single model and cipher (for backward compatibility)
-# model:
-#   provider: "anthropic"  # or "openai"
-#   name: "claude-sonnet-4-5"  # e.g., "gpt-4o", "gpt-4-turbo", "claude-3-5-sonnet-20241022"
-#
-# cipher:
-#   type: "emojispeak"  # encoding type: programmatic ciphers (caesar) or prompt encodings (emojispeak, chinese, pinyin)
-#   params: {}  # cipher-specific parameters (e.g., {"shift": 3} for caesar)
-
-# Option 2: Matrix configuration (runs all combinations of models × ciphers)
 matrix:
   models:
     - provider: "anthropic"
       name: "claude-sonnet-4-5"
-    - provider: "openai"
-      name: "gpt-4o"
+    # - provider: "openai"
+    #   name: "gpt-4o"
   ciphers:
     - type: "identity"
       params: {}
@@ -29,36 +17,36 @@ matrix:
       filler:
         type: "counting"
         count: 300
-    - type: "filler"
-      params: {}
-      filler:
-        type: "lorem"
-        count: 300
-    - type: "filler"
-      params: {}
-      filler:
-        type: "baseline_neutral"
-        count: 300
-    - type: "filler"
-      params: {}
-      filler:
-        type: "positive_personal"
-        count: 300
-    - type: "filler"
-      params: {}
-      filler:
-        type: "positive_general"
-        count: 300
-    - type: "filler"
-      params: {}
-      filler:
-        type: "negative_personal"
-        count: 300
-    - type: "filler"
-      params: {}
-      filler:
-        type: "negative_general"
-        count: 300
+    # - type: "filler"
+    #   params: {}
+    #   filler:
+    #     type: "lorem"
+    #     count: 300
+    # - type: "filler"
+    #   params: {}
+    #   filler:
+    #     type: "baseline_neutral"
+    #     count: 300
+    # - type: "filler"
+    #   params: {}
+    #   filler:
+    #     type: "positive_personal"
+    #     count: 300
+    # - type: "filler"
+    #   params: {}
+    #   filler:
+    #     type: "positive_general"
+    #     count: 300
+    # - type: "filler"
+    #   params: {}
+    #   filler:
+    #     type: "negative_personal"
+    #     count: 300
+    # - type: "filler"
+    #   params: {}
+    #   filler:
+    #     type: "negative_general"
+    #     count: 300
 
 
 
