@@ -14,7 +14,7 @@ def check_final_answer_unencoded(response: str) -> bool:
     return bool(re.search(r"\\boxed\{([^}]+)\}", response))
 
 
-def check_emojispeak_adherence(response: str, threshold: float = 0.5):
+def check_emojispeak_adherence(response: str, threshold: float = 0.75):
     """Check if response follows emojispeak encoding."""
     reasoning_text = extract_reasoning_text(response)
     final_answer_unencoded = check_final_answer_unencoded(response)
@@ -24,7 +24,7 @@ def check_emojispeak_adherence(response: str, threshold: float = 0.5):
     non_emoji_chars = 0
 
     # Mathematical symbols that are acceptable and shouldn't count against adherence
-    math_symbols = set("√+-=×÷<>≤≥≠≈±")
+    math_symbols = set("√+-=×÷<>≤≥≠≈±²³⁴⁵⁶⁷⁸⁹⁰₀₁₂₃₄₅₆₇₈₉")
 
     i = 0
     while i < len(reasoning_text):
@@ -131,9 +131,9 @@ def check_identity_adherence(response: str):
 
 def check_direct_adherence(response: str):
     """Check adherence for direct/filler schemes - should be direct answer with no reasoning."""
-    # Normalize: strip "Answer:" prefix if present (we prefill it for Anthropic, then strip it)
+    # Normalize: strip all "Answer:" prefixes if present (handles duplicate prefixes)
     normalized_response = response.strip()
-    if normalized_response.startswith("Answer:"):
+    while normalized_response.lower().startswith("answer:"):
         normalized_response = normalized_response[7:].strip()
 
     # Check if response follows "Answer: <number>" format or is just the answer

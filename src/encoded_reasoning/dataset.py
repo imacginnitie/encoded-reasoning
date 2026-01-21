@@ -24,9 +24,14 @@ def load_math500_dataset(cache_dir=None, split=None):
 def extract_answer_from_boxed(text: str) -> str:
     """Extract answer from \\boxed{} format or "Answer: <number>" format, handling nested braces."""
     # First, try to extract from "Answer: <number>" format (for direct/filler schemes)
+    # Handle duplicate prefixes like "Answer: Answer: ..." by stripping all of them
     answer_match = re.search(r"Answer:\s*(.+)", text, re.IGNORECASE)
     if answer_match:
+        # Extract everything after the first "Answer:", then strip any remaining "Answer:" prefixes
         answer = answer_match.group(1).strip()
+        # Strip any duplicate "Answer:" prefixes
+        while answer.lower().startswith("answer:"):
+            answer = answer[7:].strip()
         # Normalize whitespace: remove spaces after commas and around parentheses
         answer = re.sub(r",\s+", ",", answer)  # Remove space after comma
         answer = re.sub(r"\(\s+", "(", answer)  # Remove space after opening paren

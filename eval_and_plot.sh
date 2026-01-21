@@ -83,9 +83,11 @@ if [ -d "$RESULTS_DIR" ] && [ -n "$(find "$RESULTS_DIR" -mindepth 1 -maxdepth 1 
         if [ -n "$EVAL_CONFIG_FILE" ]; then
             uv run python -m encoded_reasoning.plotting.plot_results --results-dir "$RESULTS_DIR" --config "$EVAL_CONFIG_FILE" --matrix
             uv run python -m encoded_reasoning.plotting.plot_results --results-dir "$RESULTS_DIR" --config "$EVAL_CONFIG_FILE" --matrix-ratio-only
+            uv run python -m encoded_reasoning.plotting.plot_results --results-dir "$RESULTS_DIR" --config "$EVAL_CONFIG_FILE" --matrix-ratio-only-by-model
         else
             uv run python -m encoded_reasoning.plotting.plot_results --results-dir "$RESULTS_DIR" --matrix
             uv run python -m encoded_reasoning.plotting.plot_results --results-dir "$RESULTS_DIR" --matrix-ratio-only
+            uv run python -m encoded_reasoning.plotting.plot_results --results-dir "$RESULTS_DIR" --matrix-ratio-only-by-model
         fi
         
         echo ""

@@ -1185,6 +1185,368 @@ def plot_matrix_results_ratio_only(base_dir: str | Path, config: dict | None = N
     plt.close()
 
 
+def plot_matrix_results_ratio_only_by_model(base_dir: str | Path, config: dict | None = None):
+    """Plot only the ratio (Adherent & Correct / Identity Accuracy) grouped by model.
+
+    Bars are grouped by model on the x-axis, with different ciphers as bars within each group.
+
+    Args:
+        base_dir: Base directory containing experiment results. Can be:
+            - A timestamp directory (e.g., results/20260112_081513) containing
+              subdirectories like <provider>/<model>/<cipher>/results.json
+            - A directory containing multiple experiment directories with results.json
+        config: Optional configuration dict (currently unused but kept for API consistency)
+    """
+    base_dir = Path(base_dir)
+
+    # Find all results.json files
+    results_files = list(base_dir.rglob("results.json"))
+
+    if not results_files:
+        print(f"Warning: No results.json files found in {base_dir}")
+        return
+
+    # Load all experiment results (reuse the same loading logic)
+    experiments = []
+    for results_file in sorted(results_files):
+        try:
+            results = json.loads(results_file.read_text())
+            metrics = results.get("metrics", {})
+
+            if not metrics:
+                continue
+
+            # Extract experiment info
+            exp_dir = results_file.parent
+            cipher_type = results.get("config", {}).get("cipher", {}).get("type", "unknown")
+            model_name = results.get("config", {}).get("model", {}).get("name", "unknown")
+            provider = results.get("config", {}).get("model", {}).get("provider", "unknown")
+
+            # Skip identity experiments
+            if cipher_type.lower() == "identity":
+                continue
+
+            # Extract filler type if this is a filler experiment
+            filler_config = results.get("config", {}).get("cipher", {}).get("filler", {})
+            filler_type = filler_config.get("type") if filler_config else None
+
+            # Create label from directory structure or config
+            parts = exp_dir.parts
+            label_parts = []
+            if "results" in parts:
+                results_idx = parts.index("results")
+                if results_idx + 4 < len(parts):
+                    cipher_part = parts[results_idx + 4]
+                    label_parts = [cipher_part]
+                elif len(parts) >= 1:
+                    label_parts = [parts[-1]]
+
+            if not label_parts:
+                # Use cipher type, and add filler type if it's a filler experiment
+                if cipher_type == "filler" and filler_type:
+                    label = f"filler_{filler_type}"
+                else:
+                    label = f"{cipher_type}"
+            else:
+                label = label_parts[0]
+                # If it's a filler experiment, ensure the label includes the filler type
+                if cipher_type == "filler" and filler_type and f"filler_{filler_type}" not in label:
+                    # Replace generic "filler" with specific filler type
+                    label = label.replace("filler", f"filler_{filler_type}")
+
+            # Get adherent_and_correct_rate for ratio calculation
+            adherent_and_correct = metrics.get("adherent_and_correct_rate", 0.0)
+            adherent_and_correct_err = metrics.get("adherent_and_correct_std_error", 0.0)
+
+            # Find identity baseline for this model
+            identity_metrics = _find_identity_results(exp_dir)
+            identity_accuracy = 0.0
+            if identity_metrics:
+                identity_accuracy = identity_metrics.get("accuracy", 0.0)
+
+            # Calculate ratio: adherent_and_correct / identity_accuracy
+            ratio = adherent_and_correct / identity_accuracy if identity_accuracy > 0 else 0.0
+            ratio_err = (
+                _calculate_ratio_error(
+                    adherent_and_correct,
+                    adherent_and_correct_err,
+                    identity_accuracy,
+                    identity_metrics.get("accuracy_std_error", 0.0) if identity_metrics else 0.0,
+                )
+                if identity_accuracy > 0
+                else 0.0
+            )
+
+            experiments.append(
+                {
+                    "label": label,
+                    "cipher": cipher_type,
+                    "model": model_name,
+                    "provider": provider,
+                    "ratio": ratio,
+                    "ratio_err": ratio_err,
+                    "n": metrics.get("n", 0),
+                }
+            )
+        except Exception as e:
+            print(f"Warning: Failed to load {results_file}: {e}")
+            continue
+
+    if not experiments:
+        print(f"Warning: No valid experiment results found in {base_dir}")
+        return
+
+    # Group experiments by model and label (cipher)
+    unique_models = sorted(set(exp["model"] for exp in experiments))
+    unique_labels = sorted(set(exp["label"] for exp in experiments))
+
+    # Create a mapping: model -> label -> experiment data
+    model_label_map = {}
+    for exp in experiments:
+        model = exp["model"]
+        label = exp["label"]
+        if model not in model_label_map:
+            model_label_map[model] = {}
+        model_label_map[model][label] = exp
+
+    # Determine if we have multiple models
+    has_multiple_models = len(unique_models) > 1
+    has_multiple_labels = len(unique_labels) > 1
+
+    # Create the plot
+    if has_multiple_models or has_multiple_labels:
+        # Grouped bar chart: groups are models, bars within groups are labels (ciphers)
+        n_models = len(unique_models)
+        n_labels = len(unique_labels)
+
+        # Width calculations for grouped bars
+        group_width = 0.8  # Total width for each model group
+        bar_width = group_width / n_labels  # Width of each individual bar
+
+        fig, ax = plt.subplots(figsize=(max(12, n_models * 1.5), 8))
+
+        x_pos = np.arange(n_models)
+
+        # Colors for labels/ciphers (cycling through a palette)
+        cmap = plt.cm.get_cmap("Set3")
+        label_colors = [cmap(i / max(1, n_labels - 1)) for i in range(n_labels)]
+
+        # Plot bars for each label (cipher)
+        for label_idx, label in enumerate(unique_labels):
+            label_ratio = []
+            label_ratio_err = []
+
+            for model in unique_models:
+                if model in model_label_map and label in model_label_map[model]:
+                    exp = model_label_map[model][label]
+                    label_ratio.append(exp["ratio"])
+                    label_ratio_err.append(exp["ratio_err"])
+                else:
+                    # Missing data
+                    label_ratio.append(0)
+                    label_ratio_err.append(0)
+
+            # Calculate positions for this label's bars
+            offset = label_idx * bar_width
+
+            # Plot ratio bars (Adherent & Correct / Identity Accuracy)
+            ratio_positions = x_pos - group_width / 2 + offset + bar_width / 2
+            # Format label for display
+            if label.startswith("filler_"):
+                display_label = label.replace("filler_", "").replace("_", " ").title()
+            else:
+                display_label = label.replace("_", " ").title()
+            ax.bar(
+                ratio_positions,
+                label_ratio,
+                bar_width,
+                yerr=label_ratio_err,
+                label=display_label,
+                color=label_colors[label_idx],
+                alpha=0.8,
+                capsize=5,
+                edgecolor="black",
+                linewidth=1.5,
+            )
+
+            # Add value labels
+            for i, (ratio, ratio_err) in enumerate(zip(label_ratio, label_ratio_err)):
+                if ratio > 0:  # Only label if there's data
+                    ax.text(
+                        ratio_positions[i],
+                        ratio + ratio_err + 0.02,
+                        f"{ratio:.2f}",
+                        ha="center",
+                        va="bottom",
+                        fontsize=8,
+                        fontweight="bold",
+                    )
+
+        # Get n values for title
+        n_values = [exp["n"] for exp in experiments]
+        n_str = (
+            f"n={n_values[0]}" if len(set(n_values)) == 1 else f"n={min(n_values)}-{max(n_values)}"
+        )
+
+        # Customize plot
+        ax.set_xlabel("Model", fontsize=12, fontweight="bold")
+        ax.set_ylabel("Adh&Corr/IdAcc Ratio", fontsize=12, fontweight="bold")
+        title = f"Adherent & Correct / Identity Accuracy Ratio by Model ({n_str})"
+        ax.set_title(title, fontsize=14, fontweight="bold")
+        ax.set_xticks(x_pos)
+        ax.set_xticklabels(unique_models, rotation=45, ha="right")
+        max_ratio = max((exp["ratio"] + exp["ratio_err"] for exp in experiments), default=1.1)
+        ax.set_ylim(0, max(1.1, max_ratio))
+
+        # Find direct accuracy ratio for each model and plot as horizontal line
+        model_direct_ratios = {}
+        for model in unique_models:
+            # Find any experiment directory for this model
+            for results_file in base_dir.rglob("results.json"):
+                try:
+                    results = json.loads(results_file.read_text())
+                    exp_model = results.get("config", {}).get("model", {}).get("name", "")
+                    exp_cipher = results.get("config", {}).get("cipher", {}).get("type", "")
+                    if exp_model == model and exp_cipher.lower() != "identity":
+                        exp_dir = results_file.parent
+                        # Find direct results for this model
+                        direct_metrics = _find_direct_results(exp_dir)
+                        identity_metrics = _find_identity_results(exp_dir)
+                        if direct_metrics and identity_metrics:
+                            direct_accuracy = direct_metrics.get("accuracy", 0.0)
+                            identity_accuracy = identity_metrics.get("accuracy", 0.0)
+                            if identity_accuracy > 0:
+                                direct_ratio = direct_accuracy / identity_accuracy
+                                model_direct_ratios[model] = direct_ratio
+                                break
+                except Exception:
+                    continue
+                if model in model_direct_ratios:
+                    break
+
+        # Plot baseline line first
+        ax.axhline(
+            y=1.0,
+            color="green",
+            linestyle="--",
+            alpha=0.7,
+            linewidth=2,
+            label="Baseline (1.0)",
+        )
+
+        # Plot direct accuracy ratio lines for each model
+        # Use distinct colors for each model's direct line to contrast with bars
+        direct_line_colors = ["orange", "purple", "brown", "pink", "cyan", "magenta"]
+        for model_idx, model in enumerate(unique_models):
+            if model in model_direct_ratios:
+                direct_ratio = model_direct_ratios[model]
+                line_color = direct_line_colors[model_idx % len(direct_line_colors)]
+                ax.axhline(
+                    y=direct_ratio,
+                    color=line_color,
+                    linestyle=":",
+                    alpha=0.9,
+                    linewidth=2.5,
+                    label=f"{model} - Direct Acc",
+                )
+
+        ax.legend(fontsize=10, title="Cipher Type", loc="upper left")
+        ax.grid(True, alpha=0.3, axis="y")
+
+    else:
+        # Single model and single label: simple bar
+        fig, ax = plt.subplots(figsize=(8, 6))
+
+        x_pos = np.arange(1)
+        width = 0.6
+
+        exp = experiments[0]
+        ax.bar(
+            x_pos,
+            [exp["ratio"]],
+            width,
+            yerr=[exp["ratio_err"]],
+            label="Adh&Corr/IdAcc",
+            color="mediumseagreen",
+            alpha=0.8,
+            capsize=5,
+            edgecolor="black",
+            linewidth=1.5,
+        )
+
+        n_str = f"n={exp['n']}"
+        ax.set_xlabel("Model", fontsize=12, fontweight="bold")
+        ax.set_ylabel("Adh&Corr/IdAcc Ratio", fontsize=12, fontweight="bold")
+        title = f"Adherent & Correct / Identity Accuracy Ratio by Model ({n_str})"
+        ax.set_title(title, fontsize=14, fontweight="bold")
+        ax.set_xticks(x_pos)
+        ax.set_xticklabels([exp["model"]], rotation=45, ha="right")
+        max_ratio = exp["ratio"] + exp["ratio_err"]
+        ax.set_ylim(0, max(1.1, max_ratio))
+
+        ax.axhline(
+            y=1.0,
+            color="green",
+            linestyle="--",
+            alpha=0.7,
+            linewidth=2,
+            label="Baseline (1.0)",
+        )
+
+        # Find direct accuracy ratio
+        direct_ratio = None
+        for results_file in base_dir.rglob("results.json"):
+            try:
+                results = json.loads(results_file.read_text())
+                exp_model = results.get("config", {}).get("model", {}).get("name", "")
+                exp_cipher = results.get("config", {}).get("cipher", {}).get("type", "")
+                if exp_model == exp["model"] and exp_cipher.lower() != "identity":
+                    exp_dir = results_file.parent
+                    direct_metrics = _find_direct_results(exp_dir)
+                    identity_metrics = _find_identity_results(exp_dir)
+                    if direct_metrics and identity_metrics:
+                        direct_accuracy = direct_metrics.get("accuracy", 0.0)
+                        identity_accuracy = identity_metrics.get("accuracy", 0.0)
+                        if identity_accuracy > 0:
+                            direct_ratio = direct_accuracy / identity_accuracy
+                            break
+            except Exception:
+                continue
+
+        if direct_ratio is not None:
+            ax.axhline(
+                y=direct_ratio,
+                color="orange",
+                linestyle=":",
+                alpha=0.9,
+                linewidth=2.5,
+                label="Direct Acc",
+            )
+
+        ax.legend(fontsize=11)
+        ax.grid(True, alpha=0.3, axis="y")
+
+        if exp["ratio"] > 0:
+            ax.text(
+                0,
+                exp["ratio"] + exp["ratio_err"] + 0.02,
+                f"{exp['ratio']:.2f}",
+                ha="center",
+                va="bottom",
+                fontsize=11,
+                fontweight="bold",
+            )
+
+    plt.tight_layout()
+
+    # Save plot
+    output_path = base_dir / "matrix_plot_ratio_only_by_model.png"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    print(f"✓ Ratio-only matrix plot (grouped by model) saved to {output_path}")
+    plt.close()
+
+
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(description="Plot experiment results")
@@ -1210,13 +1572,20 @@ def main():
         action="store_true",
         help="Plot matrix of experiments showing only the ratio (Adh&Corr/IdAcc)",
     )
+    parser.add_argument(
+        "--matrix-ratio-only-by-model",
+        action="store_true",
+        help="Plot matrix of experiments showing only the ratio (Adh&Corr/IdAcc), grouped by model",
+    )
     args = parser.parse_args()
 
     config = {}
     if args.config:
         config = load_config(args.config)
 
-    if args.matrix_ratio_only:
+    if args.matrix_ratio_only_by_model:
+        plot_matrix_results_ratio_only_by_model(args.results_dir, config)
+    elif args.matrix_ratio_only:
         plot_matrix_results_ratio_only(args.results_dir, config)
     elif args.matrix:
         plot_matrix_results(args.results_dir, config)

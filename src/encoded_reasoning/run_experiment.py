@@ -65,9 +65,11 @@ def call_llm(
                     temperature=0.0,
                 )
                 response_text = response.choices[0].message.content or ""
-                # If we prefilled, prepend the prefill to the response
+                # If we prefilled, prepend the prefill only if response doesn't already have it
                 if assistant_prefill:
-                    return assistant_prefill + " " + response_text
+                    # Check if response already starts with the prefill (case-insensitive)
+                    if not response_text.strip().lower().startswith(assistant_prefill.lower()):
+                        return assistant_prefill + " " + response_text
                 return response_text
             elif provider == "anthropic":
                 client = anthropic.Anthropic(api_key=api_key)
