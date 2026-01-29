@@ -1,6 +1,7 @@
 """Dataset loading utilities."""
 
 import json
+import random
 import re
 from pathlib import Path
 
@@ -19,6 +20,90 @@ def load_math500_dataset(cache_dir=None, split=None):
         }
         for item in data
     ]
+
+
+def load_aime2025_dataset(cache_dir=None):
+    """Load AIME 2025 dataset."""
+    dataset = load_dataset(
+        "yentinglin/aime_2025", cache_dir=str(cache_dir) if cache_dir else None
+    )
+    data = dataset["train"]
+    return [
+        {
+            "problem": dict(item).get("problem", ""),
+            "solution": dict(item).get("solution", ""),
+            "answer": str(dict(item).get("answer", "")),
+        }
+        for item in data
+    ]
+
+
+def load_gpqa_diamond_dataset(cache_dir=None):
+    """Load GPQA Diamond dataset with shuffled multiple-choice options."""
+    dataset = load_dataset(
+        "Idavidrein/gpqa", "gpqa_diamond", cache_dir=str(cache_dir) if cache_dir else None
+    )
+    data = dataset["train"]
+    examples = []
+    for idx, item in enumerate(data):
+        item = dict(item)
+        choices = [
+            item["Correct Answer"],
+            item["Incorrect Answer 1"],
+            item["Incorrect Answer 2"],
+            item["Incorrect Answer 3"],
+        ]
+        rng = random.Random(idx)
+        rng.shuffle(choices)
+        correct_letter = chr(65 + choices.index(item["Correct Answer"]))
+
+        choice_text = "\n".join(f"({chr(65 + i)}) {c}" for i, c in enumerate(choices))
+        problem = f"{item['Question']}\n\n{choice_text}"
+
+        examples.append({
+            "problem": problem,
+            "solution": item.get("Explanation", ""),
+            "answer": correct_letter,
+        })
+    return examples
+
+
+def load_dataset_by_name(name: str, cache_dir=None):
+    """Load dataset by name."""
+    loaders = {
+        "math500": load_math500_dataset,
+        "aime2025": load_aime2025_dataset,
+        "gpqa_diamond": load_gpqa_diamond_dataset,
+    }
+    if name not in loaders:
+        raise ValueError(f"Unknown dataset: {name}. Must be one of: {', '.join(loaders)}")
+    return loaders[name](cache_dir=cache_dir)
+
+
+def normalize_latex_answer(s: str) -> str:
+    """Normalize LaTeX answer string for comparison.
+
+    Handles common equivalent representations:
+    - \\dfrac/\\tfrac -> \\frac
+    - \\frac XY -> \\frac{X}{Y} (single-char shorthand)
+    - \\text{...} -> bare content
+    - Whitespace normalization
+    """
+    s = s.strip()
+    # \dfrac and \tfrac are display variants of \frac
+    s = s.replace("\\dfrac", "\\frac")
+    s = s.replace("\\tfrac", "\\frac")
+    # \text{...} -> just the content inside
+    s = re.sub(r"\\text\s*\{([^}]*)\}", r"\1", s)
+    s = re.sub(r"\\textbf\s*\{([^}]*)\}", r"\1", s)
+    # \frac XY or \fracXY -> \frac{X}{Y} for single-char arguments (LaTeX shorthand)
+    # e.g. \frac 59 -> \frac{5}{9}, \frac43 -> \frac{4}{3}
+    s = re.sub(r"\\frac\s*(\w)(\w)(?!\w)", r"\\frac{\1}{\2}", s)
+    # \frac{X}Y -> \frac{X}{Y} for single-char second argument
+    s = re.sub(r"\\frac(\{[^}]*\})\s*(\w)(?![{\\\w])", r"\\frac\1{\2}", s)
+    # Collapse whitespace
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
 
 
 def extract_answer_from_boxed(text: str) -> str:
@@ -98,9 +183,21 @@ def load_processed_dataset(input_path):
         return [json.loads(line) for line in f if line.strip()]
 
 
-def load_encoded_examples(encoding_type: str, num_examples: int):
-    """Load pre-made encoded examples if available."""
-    import random
+def load_encoded_examples(encoding_type: str, num_examples: int, dataset_name: str | None = None):
+    """Load pre-made encoded examples if available.
+
+    Checks dataset-specific directory first
+    (e.g., data/encoded_examples/gpqa_diamond/identity.jsonl),
+    then falls back to the generic directory.
+    """
+    if dataset_name:
+        dataset_path = Path(f"data/encoded_examples/{dataset_name}/{encoding_type}.jsonl")
+        if dataset_path.exists():
+            examples = load_processed_dataset(dataset_path)
+            if len(examples) > num_examples:
+                random.seed(42)
+                return random.sample(examples, num_examples)
+            return examples
 
     encoded_examples_path = Path(f"data/encoded_examples/{encoding_type}.jsonl")
     if not encoded_examples_path.exists():

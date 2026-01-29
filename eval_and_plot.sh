@@ -14,7 +14,7 @@ RESULTS_DIR="$1"
 EVAL_CONFIG_FILE="${2:-}"
 
 # Check if this is a timestamp directory (contains provider subdirectories)
-# Structure: results/<timestamp>/<provider>/<model>/<cipher>
+# Structure: results/<timestamp>/<dataset>/<provider>/<model>/<cipher>
 if [ -d "$RESULTS_DIR" ] && [ -n "$(find "$RESULTS_DIR" -mindepth 1 -maxdepth 1 -type d)" ]; then
     # Check if first subdirectory looks like a provider (not a direct results.json)
     FIRST_SUBDIR=$(find "$RESULTS_DIR" -mindepth 1 -maxdepth 1 -type d | head -1)

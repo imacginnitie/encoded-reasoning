@@ -4,9 +4,24 @@ import re
 
 
 def extract_reasoning_text(response: str) -> str:
-    """Extract reasoning text, removing the final boxed answer."""
-    reasoning_text = re.sub(r"\\boxed\{[^}]+\}", "", response).strip()
-    return reasoning_text
+    """Extract reasoning text, removing all \\boxed{...} answers (handles nested braces)."""
+    result = response
+    while True:
+        match = re.search(r"\\boxed\{", result)
+        if not match:
+            break
+        start = match.start()
+        # Find matching closing brace by counting depth
+        depth = 1
+        i = match.end()
+        while i < len(result) and depth > 0:
+            if result[i] == "{":
+                depth += 1
+            elif result[i] == "}":
+                depth -= 1
+            i += 1
+        result = result[:start] + result[i:]
+    return result.strip()
 
 
 def check_final_answer_unencoded(response: str) -> bool:
@@ -24,7 +39,7 @@ def check_emojispeak_adherence(response: str, threshold: float = 0.75):
     non_emoji_chars = 0
 
     # Mathematical symbols that are acceptable and shouldn't count against adherence
-    math_symbols = set("√+-=×÷<>≤≥≠≈±²³⁴⁵⁶⁷⁸⁹⁰₀₁₂₃₄₅₆₇₈₉")
+    math_symbols = set("√+-=×÷<>≤≥≠≈±²³⁴⁵⁶⁷⁸⁹⁰₀₁₂₃₄₅₆₇₈₉¹⁻•~∇/ℏ∆")
 
     i = 0
     while i < len(reasoning_text):
@@ -39,13 +54,16 @@ def check_emojispeak_adherence(response: str, threshold: float = 0.75):
 
         # Check if it's an emoji code point
         is_emoji_code = (
-            (0x1F300 <= code_point <= 0x1F9FF)  # Miscellaneous Symbols and Pictographs
+            (0x1F100 <= code_point <= 0x1F1FF)  # Enclosed Alphanumeric Supplement
+            or (0x1F300 <= code_point <= 0x1F9FF)  # Miscellaneous Symbols and Pictographs
             or (0x2600 <= code_point <= 0x26FF)  # Miscellaneous Symbols
             or (0x2700 <= code_point <= 0x27BF)  # Dingbats
             or (0xFE00 <= code_point <= 0xFE0F)  # Variation Selectors
             or (0x1F600 <= code_point <= 0x1F64F)  # Emoticons
             or (0x1F900 <= code_point <= 0x1F9FF)  # Supplemental Symbols and Pictographs
             or (0x1FA00 <= code_point <= 0x1FAFF)  # Symbols and Pictographs Extended-A
+            or (0x2300 <= code_point <= 0x23FF)  # Miscellaneous Technical (⏰, ⏱, etc.)
+            or (0x2B00 <= code_point <= 0x2BFF)  # Misc Symbols and Arrows (⬆, ⬇, etc.)
         )
 
         # Check if it's a combining character (part of emoji sequence)
@@ -83,7 +101,6 @@ def check_emojispeak_adherence(response: str, threshold: float = 0.75):
     total_content = emoji_sequences + non_emoji_chars
     emoji_ratio = emoji_sequences / max(total_content, 1) if total_content > 0 else 0.0
 
-    # Lower threshold to 0.5 (50%) to be more lenient
     # The response has many emoji sequences, just also has necessary math symbols
     follows_format = emoji_ratio >= threshold
     is_adherent = follows_format and final_answer_unencoded

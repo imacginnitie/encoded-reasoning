@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 from encoded_reasoning.adherence import check_adherence
 from encoded_reasoning.ciphers import get_encoding_scheme
-from encoded_reasoning.dataset import extract_answer_from_boxed
+from encoded_reasoning.dataset import extract_answer_from_boxed, normalize_latex_answer
 
 
 def _calculate_std_error(rate: float, n: int) -> float:
@@ -40,21 +40,28 @@ def evaluate_results(results_dir: str | Path, config: dict | None = None):
     responses = results.get("responses", [])
     print(f"Evaluating {len(responses)} responses...")
     for item in tqdm(responses, desc="Evaluating responses", unit="response"):
-        predicted = extract_answer_from_boxed(item.get("response", ""))
+        predicted = extract_answer_from_boxed(item.get("response") or "")
         predictions.append(predicted)
-        ground_truth.append(item.get("expected_answer", ""))
-        adherence = check_adherence(item.get("response", ""), encoding_type, scheme)
+        expected = item.get("expected_answer", "")
+        ground_truth.append(expected)
+        is_correct = normalize_latex_answer(predicted) == normalize_latex_answer(expected)
+        item["is_correct"] = is_correct
+        adherence = check_adherence(item.get("response") or "", encoding_type, scheme)
         adherence_scores.append(adherence)
         item["adherence"] = adherence
 
     n = len(predictions)
-    correct = sum(1 for p, gt in zip(predictions, ground_truth) if p == gt)
+    correct = sum(
+        1
+        for p, gt in zip(predictions, ground_truth)
+        if normalize_latex_answer(p) == normalize_latex_answer(gt)
+    )
     accuracy = correct / n if n > 0 else 0.0
     adherence_rate = sum(1 for a in adherence_scores if a["is_adherent"]) / n if n > 0 else 0.0
     adherent_and_correct = sum(
         1
         for p, gt, a in zip(predictions, ground_truth, adherence_scores)
-        if p == gt and a["is_adherent"]
+        if normalize_latex_answer(p) == normalize_latex_answer(gt) and a["is_adherent"]
     )
     adherent_and_correct_rate = adherent_and_correct / n if n > 0 else 0.0
 

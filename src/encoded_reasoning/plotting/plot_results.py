@@ -20,96 +20,45 @@ def load_config(config_path: str):
         return yaml.safe_load(f)
 
 
-def _find_identity_results(results_dir: Path):
-    """Find identity baseline results for the same model/provider.
+def _find_sibling_results(results_dir: Path, cipher_name: str):
+    """Find results for a sibling cipher (same model/provider, different cipher).
 
-    Directory structure: results/<timestamp>/<provider>/<model>/<cipher>
+    Works by navigating up from the cipher directory to the model directory,
+    then looking for the sibling cipher. Supports both old and new directory structures:
+      - results/<timestamp>/<provider>/<model>/<cipher>
+      - results/<timestamp>/<dataset>/<provider>/<model>/<cipher>
     """
-    parts = results_dir.parts
-    if len(parts) < 5:
-        return None
-
     try:
-        # Find the 'results' directory index
-        results_idx = None
-        for i, part in enumerate(parts):
-            if part == "results":
-                results_idx = i
-                break
+        # results_dir is the cipher directory; go up one level to the model directory
+        model_dir = results_dir.parent
+        sibling_dir = model_dir / cipher_name
 
-        if results_idx is None or results_idx + 4 >= len(parts):
+        if not sibling_dir.exists():
             return None
 
-        # Structure: results/<timestamp>/<provider>/<model>/<cipher>
-        timestamp = parts[results_idx + 1]
-        provider = parts[results_idx + 2]
-        model = parts[results_idx + 3]
-
-        # Look for identity in same timestamp directory
-        identity_base = Path(*parts[: results_idx + 1]) / timestamp / provider / model / "identity"
-
-        if not identity_base.exists():
-            return None
-
-        identity_results_file = identity_base / "results.json"
-        if identity_results_file.exists():
+        sibling_results_file = sibling_dir / "results.json"
+        if sibling_results_file.exists():
             try:
-                identity_results = json.loads(identity_results_file.read_text())
-                identity_metrics = identity_results.get("metrics", {})
-                if identity_metrics:
-                    return identity_metrics
+                sibling_results = json.loads(sibling_results_file.read_text())
+                sibling_metrics = sibling_results.get("metrics", {})
+                if sibling_metrics:
+                    return sibling_metrics
             except Exception:
                 pass
 
         return None
     except Exception:
         return None
+
+
+def _find_identity_results(results_dir: Path):
+    """Find identity baseline results for the same model/provider."""
+    return _find_sibling_results(results_dir, "identity")
 
 
 def _find_direct_results(results_dir: Path):
-    """Find direct cipher results for the same model/provider.
-
-    Directory structure: results/<timestamp>/<provider>/<model>/<cipher>
-    """
-    parts = results_dir.parts
-    if len(parts) < 5:
-        return None
-
-    try:
-        # Find the 'results' directory index
-        results_idx = None
-        for i, part in enumerate(parts):
-            if part == "results":
-                results_idx = i
-                break
-
-        if results_idx is None or results_idx + 4 >= len(parts):
-            return None
-
-        # Structure: results/<timestamp>/<provider>/<model>/<cipher>
-        timestamp = parts[results_idx + 1]
-        provider = parts[results_idx + 2]
-        model = parts[results_idx + 3]
-
-        # Look for direct in same timestamp directory
-        direct_base = Path(*parts[: results_idx + 1]) / timestamp / provider / model / "direct"
-
-        if not direct_base.exists():
-            return None
-
-        direct_results_file = direct_base / "results.json"
-        if direct_results_file.exists():
-            try:
-                direct_results = json.loads(direct_results_file.read_text())
-                direct_metrics = direct_results.get("metrics", {})
-                if direct_metrics:
-                    return direct_metrics
-            except Exception:
-                pass
-
-        return None
-    except Exception:
-        return None
+    """Find direct cipher results for the same model/provider."""
+    return _find_sibling_results(results_dir, "direct")
 
 
 def _calculate_ratio_error(numerator, num_err, denominator, denom_err):
@@ -357,83 +306,66 @@ def plot_results(results_dir: str | Path, config: dict | None = None):
             print("ℹ No identity baseline found - skipping ratio plot")
 
 
-def plot_matrix_results(base_dir: str | Path, config: dict | None = None):
-    """Plot accuracy and adherence for a matrix of experiments on one graph.
+def _make_experiment_label(exp_dir: Path, cipher_type: str, filler_type: str | None) -> str:
+    """Create a display label for an experiment from its directory structure."""
+    # The experiment directory name is the cipher name (last component of the path)
+    label = exp_dir.name
+
+    if not label or label == ".":
+        if cipher_type == "filler" and filler_type:
+            return f"filler_{filler_type}"
+        return f"{cipher_type}"
+
+    if cipher_type == "filler" and filler_type and f"filler_{filler_type}" not in label:
+        label = label.replace("filler", f"filler_{filler_type}")
+    return label
+
+
+def _load_matrix_experiments(
+    base_dir: Path, skip_identity: bool = False, include_full_metrics: bool = False
+) -> list[dict]:
+    """Load all experiment results from a matrix results directory.
 
     Args:
-        base_dir: Base directory containing experiment results. Can be:
-            - A timestamp directory (e.g., results/20260112_081513) containing
-              subdirectories like <provider>/<model>/<cipher>/results.json
-            - A directory containing multiple experiment directories with results.json
-        config: Optional configuration dict (currently unused but kept for API consistency)
+        base_dir: Base directory containing experiment results.
+        skip_identity: If True, skip identity cipher experiments.
+        include_full_metrics: If True, include accuracy/adherence fields (for plot_matrix_results).
+
+    Returns:
+        List of experiment dicts with label, cipher, model, provider, ratio, ratio_err, n,
+        and optionally accuracy/adherence fields.
     """
-    base_dir = Path(base_dir)
-
-    # Find all results.json files
     results_files = list(base_dir.rglob("results.json"))
-
     if not results_files:
-        print(f"Warning: No results.json files found in {base_dir}")
-        return
+        return []
 
-    # Load all experiment results
     experiments = []
     for results_file in sorted(results_files):
         try:
             results = json.loads(results_file.read_text())
             metrics = results.get("metrics", {})
-
             if not metrics:
                 continue
 
-            # Extract experiment info
             exp_dir = results_file.parent
             cipher_type = results.get("config", {}).get("cipher", {}).get("type", "unknown")
             model_name = results.get("config", {}).get("model", {}).get("name", "unknown")
             provider = results.get("config", {}).get("model", {}).get("provider", "unknown")
 
-            # Extract filler type if this is a filler experiment
+            if skip_identity and cipher_type.lower() == "identity":
+                continue
+
             filler_config = results.get("config", {}).get("cipher", {}).get("filler", {})
             filler_type = filler_config.get("type") if filler_config else None
 
-            # Create label from directory structure or config
-            # Try to extract meaningful label from path: <provider>/<model>/<cipher>
-            parts = exp_dir.parts
-            label_parts = []
-            if "results" in parts:
-                results_idx = parts.index("results")
-                if results_idx + 4 < len(parts):
-                    # Structure: .../results/<timestamp>/<provider>/<model>/<cipher>
-                    cipher_part = parts[results_idx + 4]
-                    label_parts = [cipher_part]
-                elif len(parts) >= 1:
-                    # Try to get last part as cipher name
-                    label_parts = [parts[-1]]
+            label = _make_experiment_label(exp_dir, cipher_type, filler_type)
 
-            if not label_parts:
-                # Use cipher type, and add filler type if it's a filler experiment
-                if cipher_type == "filler" and filler_type:
-                    label = f"filler_{filler_type}"
-                else:
-                    label = f"{cipher_type}"
-            else:
-                label = label_parts[0]
-                # If it's a filler experiment, ensure the label includes the filler type
-                if cipher_type == "filler" and filler_type and f"filler_{filler_type}" not in label:
-                    # Replace generic "filler" with specific filler type
-                    label = label.replace("filler", f"filler_{filler_type}")
-
-            # Get adherent_and_correct_rate for ratio calculation
             adherent_and_correct = metrics.get("adherent_and_correct_rate", 0.0)
             adherent_and_correct_err = metrics.get("adherent_and_correct_std_error", 0.0)
 
-            # Find identity baseline for this model
             identity_metrics = _find_identity_results(exp_dir)
-            identity_accuracy = 0.0
-            if identity_metrics:
-                identity_accuracy = identity_metrics.get("accuracy", 0.0)
+            identity_accuracy = identity_metrics.get("accuracy", 0.0) if identity_metrics else 0.0
 
-            # Calculate ratio: adherent_and_correct / identity_accuracy
             ratio = adherent_and_correct / identity_accuracy if identity_accuracy > 0 else 0.0
             ratio_err = (
                 _calculate_ratio_error(
@@ -446,26 +378,77 @@ def plot_matrix_results(base_dir: str | Path, config: dict | None = None):
                 else 0.0
             )
 
-            experiments.append(
-                {
-                    "label": label,
-                    "cipher": cipher_type,
-                    "model": model_name,
-                    "provider": provider,
-                    "accuracy": metrics.get("accuracy", 0.0),
-                    "accuracy_err": metrics.get("accuracy_std_error", 0.0),
-                    "adherence": metrics.get("adherence_rate", 0.0),
-                    "adherence_err": metrics.get("adherence_std_error", 0.0),
-                    "adherent_and_correct": adherent_and_correct,
-                    "adherent_and_correct_err": adherent_and_correct_err,
-                    "ratio": ratio,
-                    "ratio_err": ratio_err,
-                    "n": metrics.get("n", 0),
-                }
-            )
+            exp = {
+                "label": label,
+                "cipher": cipher_type,
+                "model": model_name,
+                "provider": provider,
+                "ratio": ratio,
+                "ratio_err": ratio_err,
+                "n": metrics.get("n", 0),
+            }
+
+            if include_full_metrics:
+                exp.update(
+                    {
+                        "accuracy": metrics.get("accuracy", 0.0),
+                        "accuracy_err": metrics.get("accuracy_std_error", 0.0),
+                        "adherence": metrics.get("adherence_rate", 0.0),
+                        "adherence_err": metrics.get("adherence_std_error", 0.0),
+                        "adherent_and_correct": adherent_and_correct,
+                        "adherent_and_correct_err": adherent_and_correct_err,
+                    }
+                )
+
+            experiments.append(exp)
         except Exception as e:
             print(f"Warning: Failed to load {results_file}: {e}")
             continue
+
+    return experiments
+
+
+def _find_direct_ratios(base_dir: Path, models: list[str]) -> dict[str, float]:
+    """Find direct accuracy / identity accuracy ratio for each model.
+
+    Returns:
+        Dict mapping model name to direct/identity accuracy ratio.
+    """
+    model_direct_ratios: dict[str, float] = {}
+    for model in models:
+        for results_file in base_dir.rglob("results.json"):
+            try:
+                results = json.loads(results_file.read_text())
+                exp_model = results.get("config", {}).get("model", {}).get("name", "")
+                exp_cipher = results.get("config", {}).get("cipher", {}).get("type", "")
+                if exp_model == model and exp_cipher.lower() != "identity":
+                    exp_dir = results_file.parent
+                    direct_metrics = _find_direct_results(exp_dir)
+                    identity_metrics = _find_identity_results(exp_dir)
+                    if direct_metrics and identity_metrics:
+                        direct_accuracy = direct_metrics.get("accuracy", 0.0)
+                        identity_accuracy = identity_metrics.get("accuracy", 0.0)
+                        if identity_accuracy > 0:
+                            model_direct_ratios[model] = direct_accuracy / identity_accuracy
+                            break
+            except Exception:
+                continue
+    return model_direct_ratios
+
+
+def plot_matrix_results(base_dir: str | Path, config: dict | None = None):
+    """Plot accuracy and adherence for a matrix of experiments on one graph.
+
+    Args:
+        base_dir: Base directory containing experiment results. Can be:
+            - A timestamp directory (e.g., results/20260112_081513) containing
+              subdirectories like <provider>/<model>/<cipher>/results.json
+            - A directory containing multiple experiment directories with results.json
+        config: Optional configuration dict (currently unused but kept for API consistency)
+    """
+    base_dir = Path(base_dir)
+
+    experiments = _load_matrix_experiments(base_dir, include_full_metrics=True)
 
     if not experiments:
         print(f"Warning: No valid experiment results found in {base_dir}")
@@ -809,98 +792,7 @@ def plot_matrix_results_ratio_only(base_dir: str | Path, config: dict | None = N
     """
     base_dir = Path(base_dir)
 
-    # Find all results.json files
-    results_files = list(base_dir.rglob("results.json"))
-
-    if not results_files:
-        print(f"Warning: No results.json files found in {base_dir}")
-        return
-
-    # Load all experiment results (reuse the same loading logic)
-    experiments = []
-    for results_file in sorted(results_files):
-        try:
-            results = json.loads(results_file.read_text())
-            metrics = results.get("metrics", {})
-
-            if not metrics:
-                continue
-
-            # Extract experiment info
-            exp_dir = results_file.parent
-            cipher_type = results.get("config", {}).get("cipher", {}).get("type", "unknown")
-            model_name = results.get("config", {}).get("model", {}).get("name", "unknown")
-            provider = results.get("config", {}).get("model", {}).get("provider", "unknown")
-
-            # Skip identity experiments
-            if cipher_type.lower() == "identity":
-                continue
-
-            # Extract filler type if this is a filler experiment
-            filler_config = results.get("config", {}).get("cipher", {}).get("filler", {})
-            filler_type = filler_config.get("type") if filler_config else None
-
-            # Create label from directory structure or config
-            parts = exp_dir.parts
-            label_parts = []
-            if "results" in parts:
-                results_idx = parts.index("results")
-                if results_idx + 4 < len(parts):
-                    cipher_part = parts[results_idx + 4]
-                    label_parts = [cipher_part]
-                elif len(parts) >= 1:
-                    label_parts = [parts[-1]]
-
-            if not label_parts:
-                # Use cipher type, and add filler type if it's a filler experiment
-                if cipher_type == "filler" and filler_type:
-                    label = f"filler_{filler_type}"
-                else:
-                    label = f"{cipher_type}"
-            else:
-                label = label_parts[0]
-                # If it's a filler experiment, ensure the label includes the filler type
-                if cipher_type == "filler" and filler_type and f"filler_{filler_type}" not in label:
-                    # Replace generic "filler" with specific filler type
-                    label = label.replace("filler", f"filler_{filler_type}")
-
-            # Get adherent_and_correct_rate for ratio calculation
-            adherent_and_correct = metrics.get("adherent_and_correct_rate", 0.0)
-            adherent_and_correct_err = metrics.get("adherent_and_correct_std_error", 0.0)
-
-            # Find identity baseline for this model
-            identity_metrics = _find_identity_results(exp_dir)
-            identity_accuracy = 0.0
-            if identity_metrics:
-                identity_accuracy = identity_metrics.get("accuracy", 0.0)
-
-            # Calculate ratio: adherent_and_correct / identity_accuracy
-            ratio = adherent_and_correct / identity_accuracy if identity_accuracy > 0 else 0.0
-            ratio_err = (
-                _calculate_ratio_error(
-                    adherent_and_correct,
-                    adherent_and_correct_err,
-                    identity_accuracy,
-                    identity_metrics.get("accuracy_std_error", 0.0) if identity_metrics else 0.0,
-                )
-                if identity_accuracy > 0
-                else 0.0
-            )
-
-            experiments.append(
-                {
-                    "label": label,
-                    "cipher": cipher_type,
-                    "model": model_name,
-                    "provider": provider,
-                    "ratio": ratio,
-                    "ratio_err": ratio_err,
-                    "n": metrics.get("n", 0),
-                }
-            )
-        except Exception as e:
-            print(f"Warning: Failed to load {results_file}: {e}")
-            continue
+    experiments = _load_matrix_experiments(base_dir, skip_identity=True)
 
     if not experiments:
         print(f"Warning: No valid experiment results found in {base_dir}")
@@ -1014,37 +906,7 @@ def plot_matrix_results_ratio_only(base_dir: str | Path, config: dict | None = N
         max_ratio = max((exp["ratio"] + exp["ratio_err"] for exp in experiments), default=1.1)
         ax.set_ylim(0, max(1.1, max_ratio))
 
-        # Find direct accuracy ratio for each model and plot as horizontal line
-        # We need to find a sample experiment directory for each model to locate direct results
-        model_direct_ratios = {}
-        for model in unique_models:
-            # Find any experiment directory for this model
-            for exp in experiments:
-                if exp["model"] == model:
-                    # Try to reconstruct the experiment directory path
-                    # We'll use the base_dir and look for direct results
-                    # First, find a results.json file for this model
-                    for results_file in base_dir.rglob("results.json"):
-                        try:
-                            results = json.loads(results_file.read_text())
-                            exp_model = results.get("config", {}).get("model", {}).get("name", "")
-                            exp_cipher = results.get("config", {}).get("cipher", {}).get("type", "")
-                            if exp_model == model and exp_cipher.lower() != "identity":
-                                exp_dir = results_file.parent
-                                # Find direct results for this model
-                                direct_metrics = _find_direct_results(exp_dir)
-                                identity_metrics = _find_identity_results(exp_dir)
-                                if direct_metrics and identity_metrics:
-                                    direct_accuracy = direct_metrics.get("accuracy", 0.0)
-                                    identity_accuracy = identity_metrics.get("accuracy", 0.0)
-                                    if identity_accuracy > 0:
-                                        direct_ratio = direct_accuracy / identity_accuracy
-                                        model_direct_ratios[model] = direct_ratio
-                                        break
-                        except Exception:
-                            continue
-                    if model in model_direct_ratios:
-                        break
+        model_direct_ratios = _find_direct_ratios(base_dir, unique_models)
 
         # Plot baseline line first
         ax.axhline(
@@ -1057,7 +919,6 @@ def plot_matrix_results_ratio_only(base_dir: str | Path, config: dict | None = N
         )
 
         # Plot direct accuracy ratio lines for each model
-        # Use distinct colors for each model's direct line to contrast with bars
         direct_line_colors = ["orange", "purple", "brown", "pink", "cyan", "magenta"]
         for model_idx, model in enumerate(unique_models):
             if model in model_direct_ratios:
@@ -1122,33 +983,10 @@ def plot_matrix_results_ratio_only(base_dir: str | Path, config: dict | None = N
             label="Baseline (1.0)",
         )
 
-        # Find direct accuracy ratio for the single model
-        direct_ratio = None
-        if experiments:
-            # Use the first experiment to find the model and locate direct results
-            sample_exp = experiments[0]
-            model = sample_exp["model"]
-            # Find any results.json file for this model to get the directory structure
-            for results_file in base_dir.rglob("results.json"):
-                try:
-                    results = json.loads(results_file.read_text())
-                    exp_model = results.get("config", {}).get("model", {}).get("name", "")
-                    exp_cipher = results.get("config", {}).get("cipher", {}).get("type", "")
-                    if exp_model == model and exp_cipher.lower() != "identity":
-                        exp_dir = results_file.parent
-                        # Find direct results for this model
-                        direct_metrics = _find_direct_results(exp_dir)
-                        identity_metrics = _find_identity_results(exp_dir)
-                        if direct_metrics and identity_metrics:
-                            direct_accuracy = direct_metrics.get("accuracy", 0.0)
-                            identity_accuracy = identity_metrics.get("accuracy", 0.0)
-                            if identity_accuracy > 0:
-                                direct_ratio = direct_accuracy / identity_accuracy
-                                break
-                except Exception:
-                    continue
+        # Find and plot direct accuracy ratio for the single model
+        single_model_direct = _find_direct_ratios(base_dir, [experiments[0]["model"]])
+        direct_ratio = single_model_direct.get(experiments[0]["model"])
 
-        # Plot direct accuracy ratio line if found
         if direct_ratio is not None:
             ax.axhline(
                 y=direct_ratio,
@@ -1199,98 +1037,7 @@ def plot_matrix_results_ratio_only_by_model(base_dir: str | Path, config: dict |
     """
     base_dir = Path(base_dir)
 
-    # Find all results.json files
-    results_files = list(base_dir.rglob("results.json"))
-
-    if not results_files:
-        print(f"Warning: No results.json files found in {base_dir}")
-        return
-
-    # Load all experiment results (reuse the same loading logic)
-    experiments = []
-    for results_file in sorted(results_files):
-        try:
-            results = json.loads(results_file.read_text())
-            metrics = results.get("metrics", {})
-
-            if not metrics:
-                continue
-
-            # Extract experiment info
-            exp_dir = results_file.parent
-            cipher_type = results.get("config", {}).get("cipher", {}).get("type", "unknown")
-            model_name = results.get("config", {}).get("model", {}).get("name", "unknown")
-            provider = results.get("config", {}).get("model", {}).get("provider", "unknown")
-
-            # Skip identity experiments
-            if cipher_type.lower() == "identity":
-                continue
-
-            # Extract filler type if this is a filler experiment
-            filler_config = results.get("config", {}).get("cipher", {}).get("filler", {})
-            filler_type = filler_config.get("type") if filler_config else None
-
-            # Create label from directory structure or config
-            parts = exp_dir.parts
-            label_parts = []
-            if "results" in parts:
-                results_idx = parts.index("results")
-                if results_idx + 4 < len(parts):
-                    cipher_part = parts[results_idx + 4]
-                    label_parts = [cipher_part]
-                elif len(parts) >= 1:
-                    label_parts = [parts[-1]]
-
-            if not label_parts:
-                # Use cipher type, and add filler type if it's a filler experiment
-                if cipher_type == "filler" and filler_type:
-                    label = f"filler_{filler_type}"
-                else:
-                    label = f"{cipher_type}"
-            else:
-                label = label_parts[0]
-                # If it's a filler experiment, ensure the label includes the filler type
-                if cipher_type == "filler" and filler_type and f"filler_{filler_type}" not in label:
-                    # Replace generic "filler" with specific filler type
-                    label = label.replace("filler", f"filler_{filler_type}")
-
-            # Get adherent_and_correct_rate for ratio calculation
-            adherent_and_correct = metrics.get("adherent_and_correct_rate", 0.0)
-            adherent_and_correct_err = metrics.get("adherent_and_correct_std_error", 0.0)
-
-            # Find identity baseline for this model
-            identity_metrics = _find_identity_results(exp_dir)
-            identity_accuracy = 0.0
-            if identity_metrics:
-                identity_accuracy = identity_metrics.get("accuracy", 0.0)
-
-            # Calculate ratio: adherent_and_correct / identity_accuracy
-            ratio = adherent_and_correct / identity_accuracy if identity_accuracy > 0 else 0.0
-            ratio_err = (
-                _calculate_ratio_error(
-                    adherent_and_correct,
-                    adherent_and_correct_err,
-                    identity_accuracy,
-                    identity_metrics.get("accuracy_std_error", 0.0) if identity_metrics else 0.0,
-                )
-                if identity_accuracy > 0
-                else 0.0
-            )
-
-            experiments.append(
-                {
-                    "label": label,
-                    "cipher": cipher_type,
-                    "model": model_name,
-                    "provider": provider,
-                    "ratio": ratio,
-                    "ratio_err": ratio_err,
-                    "n": metrics.get("n", 0),
-                }
-            )
-        except Exception as e:
-            print(f"Warning: Failed to load {results_file}: {e}")
-            continue
+    experiments = _load_matrix_experiments(base_dir, skip_identity=True)
 
     if not experiments:
         print(f"Warning: No valid experiment results found in {base_dir}")
@@ -1398,31 +1145,7 @@ def plot_matrix_results_ratio_only_by_model(base_dir: str | Path, config: dict |
         max_ratio = max((exp["ratio"] + exp["ratio_err"] for exp in experiments), default=1.1)
         ax.set_ylim(0, max(1.1, max_ratio))
 
-        # Find direct accuracy ratio for each model and plot as horizontal line
-        model_direct_ratios = {}
-        for model in unique_models:
-            # Find any experiment directory for this model
-            for results_file in base_dir.rglob("results.json"):
-                try:
-                    results = json.loads(results_file.read_text())
-                    exp_model = results.get("config", {}).get("model", {}).get("name", "")
-                    exp_cipher = results.get("config", {}).get("cipher", {}).get("type", "")
-                    if exp_model == model and exp_cipher.lower() != "identity":
-                        exp_dir = results_file.parent
-                        # Find direct results for this model
-                        direct_metrics = _find_direct_results(exp_dir)
-                        identity_metrics = _find_identity_results(exp_dir)
-                        if direct_metrics and identity_metrics:
-                            direct_accuracy = direct_metrics.get("accuracy", 0.0)
-                            identity_accuracy = identity_metrics.get("accuracy", 0.0)
-                            if identity_accuracy > 0:
-                                direct_ratio = direct_accuracy / identity_accuracy
-                                model_direct_ratios[model] = direct_ratio
-                                break
-                except Exception:
-                    continue
-                if model in model_direct_ratios:
-                    break
+        model_direct_ratios = _find_direct_ratios(base_dir, unique_models)
 
         # Plot baseline line first
         ax.axhline(
@@ -1493,25 +1216,8 @@ def plot_matrix_results_ratio_only_by_model(base_dir: str | Path, config: dict |
             label="Baseline (1.0)",
         )
 
-        # Find direct accuracy ratio
-        direct_ratio = None
-        for results_file in base_dir.rglob("results.json"):
-            try:
-                results = json.loads(results_file.read_text())
-                exp_model = results.get("config", {}).get("model", {}).get("name", "")
-                exp_cipher = results.get("config", {}).get("cipher", {}).get("type", "")
-                if exp_model == exp["model"] and exp_cipher.lower() != "identity":
-                    exp_dir = results_file.parent
-                    direct_metrics = _find_direct_results(exp_dir)
-                    identity_metrics = _find_identity_results(exp_dir)
-                    if direct_metrics and identity_metrics:
-                        direct_accuracy = direct_metrics.get("accuracy", 0.0)
-                        identity_accuracy = identity_metrics.get("accuracy", 0.0)
-                        if identity_accuracy > 0:
-                            direct_ratio = direct_accuracy / identity_accuracy
-                            break
-            except Exception:
-                continue
+        single_model_direct = _find_direct_ratios(base_dir, [exp["model"]])
+        direct_ratio = single_model_direct.get(exp["model"])
 
         if direct_ratio is not None:
             ax.axhline(

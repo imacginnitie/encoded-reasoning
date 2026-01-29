@@ -18,8 +18,8 @@ from tqdm import tqdm
 from encoded_reasoning.ciphers import generate_filler_tokens, get_encoding_scheme
 from encoded_reasoning.dataset import (
     extract_answer_from_boxed,
+    load_dataset_by_name,
     load_encoded_examples,
-    load_math500_dataset,
     save_processed_dataset,
 )
 
@@ -131,44 +131,41 @@ def process_dataset(config):
         encoded_type = "direct"
     else:
         encoded_type = scheme_name
-    few_shot_processed = load_encoded_examples(encoded_type, k)
+    dataset_name = config["dataset"].get("name", "math500")
+    few_shot_processed = load_encoded_examples(encoded_type, k, dataset_name=dataset_name)
+
+    # Load and split dataset (common to both pre-made and generated examples)
+    all_examples = load_dataset_by_name(dataset_name, cache_dir="data/cache")
+    random.seed(42)
+    random.shuffle(all_examples)
+
+    num_test_requested = config["dataset"]["num_test_examples"]
+
+    if few_shot_processed is not None:
+        # Pre-made few-shot examples available — use all dataset examples for testing
+        n_train = 0
+    elif "train_split" in config["dataset"]:
+        n_train = int(len(all_examples) * config["dataset"]["train_split"])
+    else:
+        n_train = min(k * 3, int(len(all_examples) * 0.1))  # Cap at 10% max
+
+    num_test_available = len(all_examples) - n_train
+    if num_test_requested > num_test_available:
+        print(
+            f"Warning: Requested {num_test_requested} test examples, "
+            f"but only {num_test_available} available after reserving "
+            f"{n_train} for few-shot examples ({len(all_examples)} total). "
+            f"Using {num_test_available} test examples."
+        )
+    test_examples = all_examples[
+        n_train : n_train + min(num_test_requested, num_test_available)
+    ]
 
     if few_shot_processed is None:
-        # Fall back to generating examples from MATH-500 dataset
-        # Load dataset
-        all_examples = load_math500_dataset(cache_dir="data/cache")
-
-        # Split
-        random.seed(42)
-        random.shuffle(all_examples)
-
-        # Only reserve what's needed for few-shot examples (with a small buffer)
-        # Since we're not actually training, we don't need 70% of the data
-        num_test_requested = config["dataset"]["num_test_examples"]
-        # Reserve enough for few-shot examples: use k * 3 as buffer, or use train_split if specified
-        if "train_split" in config["dataset"]:
-            n_train = int(len(all_examples) * config["dataset"]["train_split"])
-        else:
-            # Reserve only what's needed: k examples + small buffer (k * 2)
-            n_train = min(k * 3, int(len(all_examples) * 0.1))  # Cap at 10% max
-
+        # Fall back to generating examples from the train split
         train_examples = all_examples[:n_train]
-        num_test_available = len(all_examples) - n_train
-        if num_test_requested > num_test_available:
-            print(
-                f"Warning: Requested {num_test_requested} test examples, "
-                f"but only {num_test_available} available after reserving "
-                f"{n_train} for few-shot examples ({len(all_examples)} total). "
-                f"Using {num_test_available} test examples."
-            )
-        test_examples = all_examples[
-            n_train : n_train + min(num_test_requested, num_test_available)
-        ]
-
-        # Sample few-shot examples
         few_shot_examples = random.sample(train_examples, min(k, len(train_examples)))
 
-        # Process examples
         few_shot_processed = []
         for ex in few_shot_examples:
             problem = ex["problem"]
@@ -196,29 +193,6 @@ def process_dataset(config):
                         "output": (f"{solution}\n\\boxed{{{answer}}}" if answer else solution),
                     }
                 )
-    else:
-        # If using pre-made examples, still need to load test examples
-        all_examples = load_math500_dataset(cache_dir="data/cache")
-        random.seed(42)
-        random.shuffle(all_examples)
-        # Only reserve what's needed for few-shot examples (with a small buffer)
-        num_test_requested = config["dataset"]["num_test_examples"]
-        if "train_split" in config["dataset"]:
-            n_train = int(len(all_examples) * config["dataset"]["train_split"])
-        else:
-            # Reserve only what's needed: k examples + small buffer (k * 2)
-            n_train = min(k * 3, int(len(all_examples) * 0.1))  # Cap at 10% max
-        num_test_available = len(all_examples) - n_train
-        if num_test_requested > num_test_available:
-            print(
-                f"Warning: Requested {num_test_requested} test examples, "
-                f"but only {num_test_available} available after reserving "
-                f"{n_train} for few-shot examples ({len(all_examples)} total). "
-                f"Using {num_test_available} test examples."
-            )
-        test_examples = all_examples[
-            n_train : n_train + min(num_test_requested, num_test_available)
-        ]
 
     # For filler ciphers, append filler tokens to inputs dynamically
     if scheme_name == "filler" and "filler" in config["cipher"]:
@@ -433,7 +407,8 @@ def run_experiment(config):
 
         # Create base timestamp directory
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        base_results_dir = Path(config["experiment"]["output_dir"]) / timestamp
+        dataset_name = config.get("dataset", {}).get("name", "math500")
+        base_results_dir = Path(config["experiment"]["output_dir"]) / timestamp / dataset_name
         base_results_dir.mkdir(parents=True, exist_ok=True)
 
         total_experiments = len(available_models) * len(ciphers)

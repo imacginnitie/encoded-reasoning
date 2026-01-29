@@ -188,6 +188,22 @@ NEGATIVE_GENERAL = (
 )
 
 
+_FILLER_TEXT_CONSTANTS: dict[str, str] = {
+    "lorem": LOREM_IPSUM_TEXT,
+    "baseline_neutral": BASELINE_NEUTRAL,
+    "positive_personal": POSITIVE_PERSONAL,
+    "positive_general": POSITIVE_GENERAL,
+    "negative_personal": NEGATIVE_PERSONAL,
+    "negative_general": NEGATIVE_GENERAL,
+}
+
+
+def _take_n_words(text: str, count: int) -> str:
+    """Take first N words from text, wrapping around if count exceeds word count."""
+    words = text.split()
+    return " ".join(words[i % len(words)] for i in range(count))
+
+
 def generate_filler_tokens(
     filler_type: str,
     count: int,
@@ -208,70 +224,17 @@ def generate_filler_tokens(
         String containing the filler tokens
     """
     if filler_type == "counting":
-        # Generate counting sequence: "1 2 3 ... N"
-        numbers = list(range(1, count + 1))
-        return " ".join(str(n) for n in numbers)
+        return " ".join(str(n) for n in range(1, count + 1))
     elif filler_type == "dots":
-        # Generate repeating string N times (defaults to "..." if not specified)
         if repeat_string is None:
             repeat_string = "..."
         return " ".join([repeat_string] * count)
-    elif filler_type == "lorem":
-        # Generate lorem ipsum text - take first N words from continuous text
-        words = LOREM_IPSUM_TEXT.split()
-        # Take first count words, repeating if necessary
-        selected_words = []
-        for i in range(count):
-            selected_words.append(words[i % len(words)])
-        return " ".join(selected_words)
-    elif filler_type == "baseline_neutral":
-        # Generate baseline neutral text - take first N words from continuous text
-        words = BASELINE_NEUTRAL.split()
-        # Take first count words, repeating if necessary
-        selected_words = []
-        for i in range(count):
-            selected_words.append(words[i % len(words)])
-        return " ".join(selected_words)
-    elif filler_type == "positive_personal":
-        # Generate positive personal reinforcement text - take first N words from continuous text
-        words = POSITIVE_PERSONAL.split()
-        # Take first count words, repeating if necessary
-        selected_words = []
-        for i in range(count):
-            selected_words.append(words[i % len(words)])
-        return " ".join(selected_words)
-    elif filler_type == "positive_general":
-        # Generate positive general text - take first N words from continuous text
-        words = POSITIVE_GENERAL.split()
-        # Take first count words, repeating if necessary
-        selected_words = []
-        for i in range(count):
-            selected_words.append(words[i % len(words)])
-        return " ".join(selected_words)
-    elif filler_type == "negative_personal":
-        # Generate negative personal text - take first N words from continuous text
-        words = NEGATIVE_PERSONAL.split()
-        # Take first count words, repeating if necessary
-        selected_words = []
-        for i in range(count):
-            selected_words.append(words[i % len(words)])
-        return " ".join(selected_words)
-    elif filler_type == "negative_general":
-        # Generate negative general text - take first N words from continuous text
-        words = NEGATIVE_GENERAL.split()
-        # Take first count words, repeating if necessary
-        selected_words = []
-        for i in range(count):
-            selected_words.append(words[i % len(words)])
-        return " ".join(selected_words)
+    elif filler_type in _FILLER_TEXT_CONSTANTS:
+        return _take_n_words(_FILLER_TEXT_CONSTANTS[filler_type], count)
     elif filler_type == "repeat":
-        # Repeat the problem N times
         if problem is None:
             raise ValueError("Problem text is required for 'repeat' filler type")
-        repeats = []
-        for i in range(1, count + 1):
-            repeats.append(f"Problem (repeat {i}): {problem}")
-        return "\n".join(repeats)
+        return "\n".join(f"Problem (repeat {i}): {problem}" for i in range(1, count + 1))
     else:
         raise ValueError(
             f"Unknown filler type: {filler_type}. "

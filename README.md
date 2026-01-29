@@ -1,6 +1,12 @@
 # Encoded Reasoning Experiments
 
-Few-shot prompting experiments with different encoding schemes on reasoning tasks.
+Few-shot prompting experiments studying how different encoding/cipher schemes affect chain-of-thought reasoning in LLMs. Tests whether encoding reasoning steps (emoji, Chinese, Caesar cipher, base64, filler tokens, etc.) impacts accuracy on math and science benchmarks.
+
+## Datasets
+
+- **MATH-500** — 500 competition math problems
+- **AIME 2025** — 30 American Invitational Mathematics Examination problems
+- **GPQA Diamond** — 198 graduate-level science multiple-choice questions
 
 ## Setup
 
@@ -12,11 +18,12 @@ Few-shot prompting experiments with different encoding schemes on reasoning task
 
 - `config.yaml` - Experiment configuration
 - `config/examples/` - Example configs for different cipher types
+- `data/encoded_examples/` - Pre-made few-shot examples (generic and dataset-specific)
 - `src/encoded_reasoning/` - Main code
   - `run_experiment.py` - Run experiments
   - `eval.py` - Evaluate results
   - `ciphers.py` - Encoding schemes
-  - `dataset.py` - Dataset loading
+  - `dataset.py` - Dataset loading (MATH-500, AIME 2025, GPQA Diamond)
   - `adherence.py` - Adherence checking
   - `plotting/plot_results.py` - Plotting and visualization
 
@@ -31,10 +38,10 @@ Few-shot prompting experiments with different encoding schemes on reasoning task
 
 ### Evaluating Results
 
-1. **Single experiment**: `bash eval_and_plot.sh results/<timestamp>/<provider>/<model>/<cipher>`
+1. **Single experiment**: `bash eval_and_plot.sh results/<timestamp>/<dataset>/<provider>/<model>/<cipher>`
 2. **All experiments in timestamp**: `bash eval_and_plot.sh results/<timestamp>` (automatically processes all experiments and generates matrix plot)
 
-Results are saved in `results/<timestamp>/<provider>/<model>/<cipher>/` with timestamps.
+Results are saved in `results/<timestamp>/<dataset>/<provider>/<model>/<cipher>/`.
 
 ## Configuration
 
@@ -67,6 +74,13 @@ matrix:
       params: {}
 ```
 
+### Dataset Selection
+```yaml
+dataset:
+  name: "math500"  # or "aime2025" or "gpqa_diamond"
+  num_test_examples: 50
+```
+
 ## Encoding Types
 
 ### Baseline
@@ -83,14 +97,14 @@ Model follows instructions to encode reasoning:
 - **`chinese`** - Think in Chinese
 - **`pinyin`** - Think in Pinyin
 
-For prompt encodings, pre-made encoded examples in `data/encoded_examples/` improve results.
+For prompt encodings, pre-made encoded examples in `data/encoded_examples/` improve results. Dataset-specific examples (e.g., `data/encoded_examples/gpqa_diamond/`) are used when available, falling back to generic examples.
 
 ### Direct Answering Modes
 No chain-of-thought reasoning, only final answer:
 - **`direct`** - Direct answering without CoT (baseline for comparison with filler tokens)
 
 ### Filler Token Experiments
-Direct answering with filler tokens inserted before the answer (based on Redwood Research findings):
+Direct answering with filler tokens inserted before the answer:
 - **`filler`** - Filler token mode with configurable filler types:
   - `counting` - Counting sequence (1 2 3 ... N)
   - `lorem` - Lorem ipsum text
