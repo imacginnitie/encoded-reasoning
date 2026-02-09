@@ -1,0 +1,27 @@
+matrix:
+  models:
+    - provider: "openrouter"
+      name: "qwen/qwen-2.5-72b-instruct"
+  ciphers:
+    - type: "identity"
+      params: {}
+    - type: "emojispeak"
+      params: {}
+    - type: "direct"
+      params: {}
+    - type: "filler"
+      params: {}
+      filler:
+        type: "counting"
+        count: 300
+
+prompt:
+  num_examples: 4
+
+dataset:
+  name: "math500"
+  num_test_examples: 500
+
+experiment:
+  output_dir: "results"
+  results_dir: "results/math500_n500"

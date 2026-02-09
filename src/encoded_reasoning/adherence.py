@@ -29,7 +29,11 @@ def check_final_answer_unencoded(response: str) -> bool:
     return bool(re.search(r"\\boxed\{([^}]+)\}", response))
 
 
-def check_emojispeak_adherence(response: str, threshold: float = 0.75):
+STRICT_EMOJI_THRESHOLD = 0.75
+LOOSE_EMOJI_THRESHOLD = 0.50
+
+
+def check_emojispeak_adherence(response: str, threshold: float = STRICT_EMOJI_THRESHOLD):
     """Check if response follows emojispeak encoding."""
     reasoning_text = extract_reasoning_text(response)
     final_answer_unencoded = check_final_answer_unencoded(response)
@@ -101,12 +105,18 @@ def check_emojispeak_adherence(response: str, threshold: float = 0.75):
     total_content = emoji_sequences + non_emoji_chars
     emoji_ratio = emoji_sequences / max(total_content, 1) if total_content > 0 else 0.0
 
-    # The response has many emoji sequences, just also has necessary math symbols
+    # Compute adherence at both thresholds
+    strict_adherent = emoji_ratio >= STRICT_EMOJI_THRESHOLD and final_answer_unencoded
+    loose_adherent = emoji_ratio >= LOOSE_EMOJI_THRESHOLD and final_answer_unencoded
+
+    # Default is_adherent uses the passed threshold
     follows_format = emoji_ratio >= threshold
     is_adherent = follows_format and final_answer_unencoded
 
     return {
         "is_adherent": is_adherent,
+        "is_adherent_strict": strict_adherent,
+        "is_adherent_loose": loose_adherent,
         "follows_format": follows_format,
         "final_answer_unencoded": final_answer_unencoded,
         "emoji_ratio": emoji_ratio,

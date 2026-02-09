@@ -360,47 +360,100 @@ def _load_matrix_experiments(
 
             label = _make_experiment_label(exp_dir, cipher_type, filler_type)
 
-            adherent_and_correct = metrics.get("adherent_and_correct_rate", 0.0)
-            adherent_and_correct_err = metrics.get("adherent_and_correct_std_error", 0.0)
-
             identity_metrics = _find_identity_results(exp_dir)
             identity_accuracy = identity_metrics.get("accuracy", 0.0) if identity_metrics else 0.0
-
-            ratio = adherent_and_correct / identity_accuracy if identity_accuracy > 0 else 0.0
-            ratio_err = (
-                _calculate_ratio_error(
-                    adherent_and_correct,
-                    adherent_and_correct_err,
-                    identity_accuracy,
-                    identity_metrics.get("accuracy_std_error", 0.0) if identity_metrics else 0.0,
-                )
-                if identity_accuracy > 0
-                else 0.0
+            identity_accuracy_err = (
+                identity_metrics.get("accuracy_std_error", 0.0) if identity_metrics else 0.0
             )
 
-            exp = {
-                "label": label,
-                "cipher": cipher_type,
-                "model": model_name,
-                "provider": provider,
-                "ratio": ratio,
-                "ratio_err": ratio_err,
-                "n": metrics.get("n", 0),
-            }
+            # Check if this experiment has strict/loose adherence data (emojispeak)
+            has_strict_loose = "strict_and_correct_rate" in metrics
 
-            if include_full_metrics:
-                exp.update(
-                    {
-                        "accuracy": metrics.get("accuracy", 0.0),
-                        "accuracy_err": metrics.get("accuracy_std_error", 0.0),
-                        "adherence": metrics.get("adherence_rate", 0.0),
-                        "adherence_err": metrics.get("adherence_std_error", 0.0),
-                        "adherent_and_correct": adherent_and_correct,
-                        "adherent_and_correct_err": adherent_and_correct_err,
+            if has_strict_loose:
+                # Create two entries: one for strict, one for loose threshold
+                for threshold_key, threshold_label in [
+                    ("strict", "strict"),
+                    ("loose", "loose"),
+                ]:
+                    adh_corr = metrics.get(f"{threshold_key}_and_correct_rate", 0.0)
+                    adh_corr_err = metrics.get(f"{threshold_key}_and_correct_std_error", 0.0)
+                    adh_rate = metrics.get(f"{threshold_key}_adherence_rate", 0.0)
+                    adh_rate_err = metrics.get(f"{threshold_key}_adherence_std_error", 0.0)
+
+                    ratio = adh_corr / identity_accuracy if identity_accuracy > 0 else 0.0
+                    ratio_err = (
+                        _calculate_ratio_error(
+                            adh_corr, adh_corr_err, identity_accuracy, identity_accuracy_err
+                        )
+                        if identity_accuracy > 0
+                        else 0.0
+                    )
+
+                    threshold_suffix = f" ({threshold_label})"
+                    exp_entry = {
+                        "label": label + threshold_suffix,
+                        "cipher": cipher_type,
+                        "model": model_name,
+                        "provider": provider,
+                        "ratio": ratio,
+                        "ratio_err": ratio_err,
+                        "n": metrics.get("n", 0),
                     }
+
+                    if include_full_metrics:
+                        exp_entry.update(
+                            {
+                                "accuracy": metrics.get("accuracy", 0.0),
+                                "accuracy_err": metrics.get("accuracy_std_error", 0.0),
+                                "adherence": adh_rate,
+                                "adherence_err": adh_rate_err,
+                                "adherent_and_correct": adh_corr,
+                                "adherent_and_correct_err": adh_corr_err,
+                            }
+                        )
+
+                    experiments.append(exp_entry)
+            else:
+                adherent_and_correct = metrics.get("adherent_and_correct_rate", 0.0)
+                adherent_and_correct_err = metrics.get("adherent_and_correct_std_error", 0.0)
+
+                ratio = (
+                    adherent_and_correct / identity_accuracy if identity_accuracy > 0 else 0.0
+                )
+                ratio_err = (
+                    _calculate_ratio_error(
+                        adherent_and_correct,
+                        adherent_and_correct_err,
+                        identity_accuracy,
+                        identity_accuracy_err,
+                    )
+                    if identity_accuracy > 0
+                    else 0.0
                 )
 
-            experiments.append(exp)
+                exp = {
+                    "label": label,
+                    "cipher": cipher_type,
+                    "model": model_name,
+                    "provider": provider,
+                    "ratio": ratio,
+                    "ratio_err": ratio_err,
+                    "n": metrics.get("n", 0),
+                }
+
+                if include_full_metrics:
+                    exp.update(
+                        {
+                            "accuracy": metrics.get("accuracy", 0.0),
+                            "accuracy_err": metrics.get("accuracy_std_error", 0.0),
+                            "adherence": metrics.get("adherence_rate", 0.0),
+                            "adherence_err": metrics.get("adherence_std_error", 0.0),
+                            "adherent_and_correct": adherent_and_correct,
+                            "adherent_and_correct_err": adherent_and_correct_err,
+                        }
+                    )
+
+                experiments.append(exp)
         except Exception as e:
             print(f"Warning: Failed to load {results_file}: {e}")
             continue
@@ -665,7 +718,10 @@ def plot_matrix_results(base_dir: str | Path, config: dict | None = None):
                     label=f"{model} - Adherence",
                 )
             )
-        ax.legend(handles=legend_elements, fontsize=10, loc="upper left")
+        ax.legend(
+            handles=legend_elements, fontsize=9, loc="upper left",
+            bbox_to_anchor=(1.02, 1), borderaxespad=0,
+        )
         ax.grid(True, alpha=0.3, axis="y")
         ax.axhline(y=1.0, color="green", linestyle="--", alpha=0.5)
 
@@ -777,6 +833,226 @@ def plot_matrix_results(base_dir: str | Path, config: dict | None = None):
     output_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
     print(f"✓ Matrix plot saved to {output_path}")
+    plt.close()
+
+
+def plot_matrix_results_per_model(base_dir: str | Path, config: dict | None = None):
+    """Generate a separate matrix plot (accuracy + adherence + ratio) for each model.
+
+    Each plot shows all cipher experiments for one model, with three bars per cipher:
+    ratio, accuracy, and adherence.
+    """
+    base_dir = Path(base_dir)
+
+    experiments = _load_matrix_experiments(base_dir, include_full_metrics=True)
+    if not experiments:
+        print(f"Warning: No valid experiment results found in {base_dir}")
+        return
+
+    unique_models = sorted(set(exp["model"] for exp in experiments))
+
+    for model in unique_models:
+        model_exps = [exp for exp in experiments if exp["model"] == model]
+        if not model_exps:
+            continue
+
+        n_exps = len(model_exps)
+        fig, ax = plt.subplots(figsize=(max(10, n_exps * 1.2), 7))
+
+        x_pos = np.arange(n_exps)
+        width = 0.25
+
+        # Ratio bars (plain)
+        ax.bar(
+            x_pos - width,
+            [exp["ratio"] for exp in model_exps],
+            width,
+            yerr=[exp["ratio_err"] for exp in model_exps],
+            label="Adh&Corr / Identity Acc",
+            color="mediumseagreen",
+            alpha=0.8,
+            capsize=5,
+            edgecolor="black",
+            linewidth=1.2,
+        )
+
+        # Accuracy bars (crosshatched)
+        ax.bar(
+            x_pos,
+            [exp["accuracy"] for exp in model_exps],
+            width,
+            yerr=[exp["accuracy_err"] for exp in model_exps],
+            label="Accuracy",
+            color="steelblue",
+            alpha=0.7,
+            capsize=5,
+            edgecolor="black",
+            linewidth=1.2,
+            hatch="xx",
+        )
+
+        # Adherence bars (dots)
+        ax.bar(
+            x_pos + width,
+            [exp["adherence"] for exp in model_exps],
+            width,
+            yerr=[exp["adherence_err"] for exp in model_exps],
+            label="Adherence",
+            color="coral",
+            alpha=0.7,
+            capsize=5,
+            edgecolor="black",
+            linewidth=1.2,
+            hatch="..",
+        )
+
+        # Value labels
+        for i, exp in enumerate(model_exps):
+            if exp["ratio"] > 0:
+                ax.text(
+                    i - width, exp["ratio"] + exp["ratio_err"] + 0.02,
+                    f"{exp['ratio']:.2f}", ha="center", va="bottom",
+                    fontsize=8, fontweight="bold",
+                )
+            ax.text(
+                i, exp["accuracy"] + exp["accuracy_err"] + 0.02,
+                f"{exp['accuracy']:.2f}", ha="center", va="bottom",
+                fontsize=8, fontweight="bold",
+            )
+            ax.text(
+                i + width, exp["adherence"] + exp["adherence_err"] + 0.02,
+                f"{exp['adherence']:.2f}", ha="center", va="bottom",
+                fontsize=8, fontweight="bold",
+            )
+
+        n_values = [exp["n"] for exp in model_exps]
+        n_str = (
+            f"n={n_values[0]}" if len(set(n_values)) == 1
+            else f"n={min(n_values)}-{max(n_values)}"
+        )
+
+        ax.set_xlabel("Cipher", fontsize=12, fontweight="bold")
+        ax.set_ylabel("Score", fontsize=12, fontweight="bold")
+        ax.set_title(f"{model} — {base_dir.name} ({n_str})", fontsize=14, fontweight="bold")
+        ax.set_xticks(x_pos)
+        display_labels = []
+        for exp in model_exps:
+            lbl = exp["label"]
+            if lbl.startswith("filler_"):
+                lbl = lbl.replace("filler_", "").replace("_", " ").title()
+            else:
+                lbl = lbl.replace("_", " ").title()
+            display_labels.append(lbl)
+        ax.set_xticklabels(display_labels, rotation=45, ha="right")
+        ax.set_ylim(0, 1.15)
+        ax.legend(fontsize=10, loc="upper right")
+        ax.grid(True, alpha=0.3, axis="y")
+        ax.axhline(y=1.0, color="green", linestyle="--", alpha=0.5)
+
+        plt.tight_layout()
+
+        # Sanitize model name for filename
+        safe_model = model.replace("/", "--").replace(" ", "_")
+        output_path = base_dir / f"matrix_plot_{safe_model}.png"
+        plt.savefig(output_path, dpi=300, bbox_inches="tight")
+        print(f"✓ Per-model matrix plot saved to {output_path}")
+        plt.close()
+
+
+def plot_adherent_correct_by_model(base_dir: str | Path, config: dict | None = None):
+    """Plot absolute adherent & correct rate for all ciphers, grouped by model, on one plot.
+
+    X-axis: models. Bars within each group: identity, emojispeak (strict/loose), direct, filler.
+    """
+    base_dir = Path(base_dir)
+
+    experiments = _load_matrix_experiments(base_dir, include_full_metrics=True)
+    if not experiments:
+        print(f"Warning: No valid experiment results found in {base_dir}")
+        return
+
+    unique_models = sorted(set(exp["model"] for exp in experiments))
+    unique_labels = sorted(set(exp["label"] for exp in experiments))
+
+    # model -> label -> exp
+    model_label_map: dict[str, dict[str, dict]] = {}
+    for exp in experiments:
+        model_label_map.setdefault(exp["model"], {})[exp["label"]] = exp
+
+    n_models = len(unique_models)
+    n_labels = len(unique_labels)
+
+    group_width = 0.8
+    bar_width = group_width / n_labels
+
+    fig, ax = plt.subplots(figsize=(max(14, n_models * 2.5), 7))
+    x_pos = np.arange(n_models)
+
+    # Use a qualitative palette
+    colors = ["#4c72b0", "#dd8452", "#55a868", "#c44e52", "#8172b3", "#937860", "#da8bc3"]
+
+    for label_idx, label in enumerate(unique_labels):
+        values = []
+        errors = []
+        for model in unique_models:
+            if model in model_label_map and label in model_label_map[model]:
+                exp = model_label_map[model][label]
+                values.append(exp["adherent_and_correct"])
+                errors.append(exp["adherent_and_correct_err"])
+            else:
+                values.append(0)
+                errors.append(0)
+
+        positions = x_pos - group_width / 2 + label_idx * bar_width + bar_width / 2
+
+        # Clean display label
+        display_label = label
+        if display_label.startswith("filler_"):
+            display_label = display_label.replace("filler_", "filler: ").replace("_", " ")
+        display_label = display_label.replace("_", " ")
+
+        ax.bar(
+            positions, values, bar_width,
+            yerr=errors, label=display_label,
+            color=colors[label_idx % len(colors)],
+            alpha=0.85, capsize=4,
+            edgecolor="black", linewidth=0.8,
+        )
+
+        # Value labels
+        for i, (val, err) in enumerate(zip(values, errors)):
+            if val > 0:
+                ax.text(
+                    positions[i], val + err + 0.01,
+                    f"{val:.2f}", ha="center", va="bottom",
+                    fontsize=7, fontweight="bold",
+                )
+
+    n_values = [exp["n"] for exp in experiments]
+    n_str = (
+        f"n={n_values[0]}" if len(set(n_values)) == 1
+        else f"n={min(n_values)}-{max(n_values)}"
+    )
+
+    ax.set_xlabel("Model", fontsize=12, fontweight="bold")
+    ax.set_ylabel("Adherent & Correct Rate", fontsize=12, fontweight="bold")
+    ax.set_title(
+        f"Adherent & Correct Rate by Model and Cipher — {base_dir.name} ({n_str})",
+        fontsize=14, fontweight="bold",
+    )
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(unique_models, rotation=30, ha="right", fontsize=10)
+    ax.set_ylim(0, 1.05)
+    ax.legend(
+        fontsize=9, title="Cipher", loc="upper left",
+        bbox_to_anchor=(1.02, 1), borderaxespad=0,
+    )
+    ax.grid(True, alpha=0.3, axis="y")
+
+    plt.tight_layout()
+    output_path = base_dir / "adherent_correct_by_model.png"
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    print(f"✓ Adherent & correct by model plot saved to {output_path}")
     plt.close()
 
 
@@ -933,7 +1209,10 @@ def plot_matrix_results_ratio_only(base_dir: str | Path, config: dict | None = N
                     label=f"{model} - Direct Acc",
                 )
 
-        ax.legend(fontsize=11, title="Model")
+        ax.legend(
+            fontsize=9, title="Model", loc="upper left",
+            bbox_to_anchor=(1.02, 1), borderaxespad=0,
+        )
         ax.grid(True, alpha=0.3, axis="y")
 
     else:
@@ -1145,9 +1424,7 @@ def plot_matrix_results_ratio_only_by_model(base_dir: str | Path, config: dict |
         max_ratio = max((exp["ratio"] + exp["ratio_err"] for exp in experiments), default=1.1)
         ax.set_ylim(0, max(1.1, max_ratio))
 
-        model_direct_ratios = _find_direct_ratios(base_dir, unique_models)
-
-        # Plot baseline line first
+        # Plot baseline line
         ax.axhline(
             y=1.0,
             color="green",
@@ -1157,23 +1434,10 @@ def plot_matrix_results_ratio_only_by_model(base_dir: str | Path, config: dict |
             label="Baseline (1.0)",
         )
 
-        # Plot direct accuracy ratio lines for each model
-        # Use distinct colors for each model's direct line to contrast with bars
-        direct_line_colors = ["orange", "purple", "brown", "pink", "cyan", "magenta"]
-        for model_idx, model in enumerate(unique_models):
-            if model in model_direct_ratios:
-                direct_ratio = model_direct_ratios[model]
-                line_color = direct_line_colors[model_idx % len(direct_line_colors)]
-                ax.axhline(
-                    y=direct_ratio,
-                    color=line_color,
-                    linestyle=":",
-                    alpha=0.9,
-                    linewidth=2.5,
-                    label=f"{model} - Direct Acc",
-                )
-
-        ax.legend(fontsize=10, title="Cipher Type", loc="upper left")
+        ax.legend(
+            fontsize=9, title="Cipher Type", loc="upper left",
+            bbox_to_anchor=(1.02, 1), borderaxespad=0,
+        )
         ax.grid(True, alpha=0.3, axis="y")
 
     else:
@@ -1283,13 +1547,27 @@ def main():
         action="store_true",
         help="Plot matrix of experiments showing only the ratio (Adh&Corr/IdAcc), grouped by model",
     )
+    parser.add_argument(
+        "--matrix-per-model",
+        action="store_true",
+        help="Generate a separate full matrix plot (accuracy + adherence + ratio) for each model",
+    )
+    parser.add_argument(
+        "--adherent-correct-by-model",
+        action="store_true",
+        help="Plot absolute adherent & correct rate for all ciphers grouped by model",
+    )
     args = parser.parse_args()
 
     config = {}
     if args.config:
         config = load_config(args.config)
 
-    if args.matrix_ratio_only_by_model:
+    if args.adherent_correct_by_model:
+        plot_adherent_correct_by_model(args.results_dir, config)
+    elif args.matrix_per_model:
+        plot_matrix_results_per_model(args.results_dir, config)
+    elif args.matrix_ratio_only_by_model:
         plot_matrix_results_ratio_only_by_model(args.results_dir, config)
     elif args.matrix_ratio_only:
         plot_matrix_results_ratio_only(args.results_dir, config)

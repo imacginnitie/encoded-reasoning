@@ -65,6 +65,28 @@ def evaluate_results(results_dir: str | Path, config: dict | None = None):
     )
     adherent_and_correct_rate = adherent_and_correct / n if n > 0 else 0.0
 
+    # Compute strict/loose adherence metrics if available (emojispeak)
+    has_strict_loose = any("is_adherent_strict" in a for a in adherence_scores)
+    if has_strict_loose:
+        strict_adherent = sum(1 for a in adherence_scores if a.get("is_adherent_strict"))
+        loose_adherent = sum(1 for a in adherence_scores if a.get("is_adherent_loose"))
+        strict_adherence_rate = strict_adherent / n if n > 0 else 0.0
+        loose_adherence_rate = loose_adherent / n if n > 0 else 0.0
+        strict_and_correct = sum(
+            1
+            for p, gt, a in zip(predictions, ground_truth, adherence_scores)
+            if normalize_latex_answer(p) == normalize_latex_answer(gt)
+            and a.get("is_adherent_strict")
+        )
+        loose_and_correct = sum(
+            1
+            for p, gt, a in zip(predictions, ground_truth, adherence_scores)
+            if normalize_latex_answer(p) == normalize_latex_answer(gt)
+            and a.get("is_adherent_loose")
+        )
+        strict_and_correct_rate = strict_and_correct / n if n > 0 else 0.0
+        loose_and_correct_rate = loose_and_correct / n if n > 0 else 0.0
+
     metrics = {
         "accuracy": accuracy,
         "accuracy_std_error": _calculate_std_error(accuracy, n),
@@ -77,6 +99,20 @@ def evaluate_results(results_dir: str | Path, config: dict | None = None):
         "adherent_and_correct": adherent_and_correct,
     }
 
+    if has_strict_loose:
+        metrics.update({
+            "strict_adherence_rate": strict_adherence_rate,
+            "strict_adherence_std_error": _calculate_std_error(strict_adherence_rate, n),
+            "strict_and_correct": strict_and_correct,
+            "strict_and_correct_rate": strict_and_correct_rate,
+            "strict_and_correct_std_error": _calculate_std_error(strict_and_correct_rate, n),
+            "loose_adherence_rate": loose_adherence_rate,
+            "loose_adherence_std_error": _calculate_std_error(loose_adherence_rate, n),
+            "loose_and_correct": loose_and_correct,
+            "loose_and_correct_rate": loose_and_correct_rate,
+            "loose_and_correct_std_error": _calculate_std_error(loose_and_correct_rate, n),
+        })
+
     results["metrics"] = metrics
     (results_dir / "results.json").write_text(json.dumps(results, indent=2))
     acc_str = f"{metrics['accuracy']:.3f} ± {metrics['accuracy_std_error']:.3f}"
@@ -88,6 +124,20 @@ def evaluate_results(results_dir: str | Path, config: dict | None = None):
     print(f"Accuracy: {acc_str} ({correct}/{n})")
     print(f"Adherence: {adh_str} ({sum(1 for a in adherence_scores if a['is_adherent'])}/{n})")
     print(f"Adherent & Correct: {adh_corr_str} ({metrics['adherent_and_correct']}/{n})")
+
+    if has_strict_loose:
+        print(
+            f"  Strict (≥0.75): adherence={metrics['strict_adherence_rate']:.3f}"
+            f" ({strict_adherent}/{n}),"
+            f" adh&corr={metrics['strict_and_correct_rate']:.3f}"
+            f" ({strict_and_correct}/{n})"
+        )
+        print(
+            f"  Loose  (≥0.50): adherence={metrics['loose_adherence_rate']:.3f}"
+            f" ({loose_adherent}/{n}),"
+            f" adh&corr={metrics['loose_and_correct_rate']:.3f}"
+            f" ({loose_and_correct}/{n})"
+        )
 
 
 def main():

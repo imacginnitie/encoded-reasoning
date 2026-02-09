@@ -1,0 +1,28 @@
+matrix:
+  models:
+    - provider: "openrouter"
+      name: "meta-llama/llama-3.3-70b-instruct"
+    - provider: "openrouter"
+      name: "qwen/qwen-2.5-72b-instruct"
+  ciphers:
+    - type: "identity"
+      params: {}
+    - type: "emojispeak"
+      params: {}
+    - type: "direct"
+      params: {}
+    - type: "filler"
+      params: {}
+      filler:
+        type: "counting"
+        count: 300
+
+prompt:
+  num_examples: 4
+
+dataset:
+  name: "math500"
+  num_test_examples: 50
+
+experiment:
+  output_dir: "results"

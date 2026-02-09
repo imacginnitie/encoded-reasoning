@@ -45,7 +45,7 @@ def call_llm(
 
     Args:
         prompt: The user prompt
-        provider: The LLM provider ("openai" or "anthropic")
+        provider: The LLM provider ("openai", "anthropic", or "openrouter")
         model: The model name
         api_key: The API key
         max_retries: Maximum number of retry attempts
@@ -53,8 +53,11 @@ def call_llm(
     """
     for attempt in range(max_retries):
         try:
-            if provider == "openai":
-                client = openai.OpenAI(api_key=api_key)
+            if provider in ("openai", "openrouter"):
+                client_kwargs = {"api_key": api_key}
+                if provider == "openrouter":
+                    client_kwargs["base_url"] = "https://openrouter.ai/api/v1"
+                client = openai.OpenAI(**client_kwargs)
                 # For OpenAI, include prefill in the prompt text if provided
                 full_prompt = prompt
                 if assistant_prefill:
@@ -140,6 +143,7 @@ def process_dataset(config):
     random.shuffle(all_examples)
 
     num_test_requested = config["dataset"]["num_test_examples"]
+    start_index = config["dataset"].get("start_index", 0)
 
     if few_shot_processed is not None:
         # Pre-made few-shot examples available — use all dataset examples for testing
@@ -157,9 +161,12 @@ def process_dataset(config):
             f"{n_train} for few-shot examples ({len(all_examples)} total). "
             f"Using {num_test_available} test examples."
         )
-    test_examples = all_examples[
-        n_train : n_train + min(num_test_requested, num_test_available)
-    ]
+    test_examples = all_examples[n_train : n_train + min(num_test_requested, num_test_available)]
+
+    # Apply start_index to skip examples already completed in a previous run
+    if start_index > 0:
+        test_examples = test_examples[start_index:]
+        print(f"Skipping first {start_index} examples (start_index={start_index})")
 
     if few_shot_processed is None:
         # Fall back to generating examples from the train split
@@ -264,6 +271,8 @@ def get_api_key(provider: str) -> Optional[str]:
         return os.getenv("OPENAI_API_KEY")
     elif provider == "anthropic":
         return os.getenv("ANTHROPIC_API_KEY")
+    elif provider == "openrouter":
+        return os.getenv("OPENROUTER_API_KEY")
     else:
         raise ValueError(f"Unknown provider: {provider}")
 
@@ -405,10 +414,14 @@ def run_experiment(config):
                 "Please set OPENAI_API_KEY and/or ANTHROPIC_API_KEY environment variables."
             )
 
-        # Create base timestamp directory
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        dataset_name = config.get("dataset", {}).get("name", "math500")
-        base_results_dir = Path(config["experiment"]["output_dir"]) / timestamp / dataset_name
+        # Create base results directory (use explicit results_dir if provided, else timestamp)
+        explicit_results_dir = config.get("experiment", {}).get("results_dir")
+        if explicit_results_dir:
+            base_results_dir = Path(explicit_results_dir)
+        else:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            dataset_name = config.get("dataset", {}).get("name", "math500")
+            base_results_dir = Path(config["experiment"]["output_dir"]) / timestamp / dataset_name
         base_results_dir.mkdir(parents=True, exist_ok=True)
 
         total_experiments = len(available_models) * len(ciphers)
@@ -477,7 +490,10 @@ def run_experiment(config):
                 }
 
                 # Create results directory for this combination
-                results_dir = base_results_dir / provider / model_name / cipher_dir_name
+                # Sanitize model name for directory path (e.g., "meta-llama/llama-3.3-70b-instruct"
+                # becomes "meta-llama--llama-3.3-70b-instruct")
+                safe_model_name = model_name.replace("/", "--")
+                results_dir = base_results_dir / provider / safe_model_name / cipher_dir_name
 
                 # Run the experiment
                 run_single_experiment(single_config, results_base_dir=results_dir)

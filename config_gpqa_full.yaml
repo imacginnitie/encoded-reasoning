@@ -1,0 +1,32 @@
+matrix:
+  models:
+    - provider: "anthropic"
+      name: "claude-sonnet-4-5"
+    - provider: "openai"
+      name: "gpt-5.2"
+    - provider: "openai"
+      name: "gpt-4o"
+    - provider: "anthropic"
+      name: "claude-opus-4-5"
+  ciphers:
+    - type: "identity"
+      params: {}
+    - type: "emojispeak"
+      params: {}
+    - type: "direct"
+      params: {}
+    - type: "filler"
+      params: {}
+      filler:
+        type: "counting"
+        count: 300
+
+prompt:
+  num_examples: 4
+
+dataset:
+  name: "gpqa_diamond"
+  num_test_examples: 198
+
+experiment:
+  output_dir: "results"
